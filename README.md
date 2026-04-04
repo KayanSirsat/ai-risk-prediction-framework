@@ -9,21 +9,21 @@ that predicts project risks, forecasts deviations, detects anomalies, and
 provides actionable mitigation insights using Machine Learning (ML),
 Natural Language Processing (NLP), and Explainable AI (XAI).
 
-## Project Status
-This project is currently in a Stage-1 → Stage-2 transition phase.
+## Project Status & Roadmap
+This project is currently in a Phase-1 → Phase-2 transition.
 
-### Completed
+### Phase 1: Planning & Design (Completed)
+- Literature survey and research gap analysis
 - System architecture and module design
 - Software Requirement Specification (IEEE-style)
-- Literature survey and research gap analysis
 
-### In Progress
+### Phase 2: Core Development (In Progress)
 - Risk classification model implementation
 - SHAP-based explainability integration
 - Time-series forecasting (Prophet)
 - NLP-based qualitative risk detection
 
-### Planned
+### Phase 3: Integration & Deployment (Planned)
 - Streamlit dashboard integration
 - Jira API live data ingestion
 - Full evaluation and deployment
