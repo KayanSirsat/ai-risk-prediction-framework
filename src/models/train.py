@@ -16,7 +16,7 @@ RF_MODEL_PATH = os.path.join(MODEL_DIR, "rf_model.pkl")
 XGB_MODEL_PATH = os.path.join(MODEL_DIR, "xgb_model.pkl")
 
 def load_and_prepare_data(path):
-    print("🚀 [INFO] Loading data from {}...".format(path))
+    print("[INFO] Loading data from {}...".format(path))
     df = pd.read_csv(path)
     
     # 1. Target Mapping
@@ -31,13 +31,13 @@ def load_and_prepare_data(path):
     leakage_cols = ["Actual_Days", "Cost_Consumed"]
     cols_to_drop = [col for col in leakage_cols if col in X.columns]
     X = X.drop(columns=cols_to_drop)
-    print(f"🚀 [INFO] Prevented target leakage by dropping: {cols_to_drop}")
+    print(f"[INFO] Prevented target leakage by dropping: {cols_to_drop}")
     
     # 4. Drop Text/ID Columns (Reserved for NLP)
     text_cols = ["Summary", "Description", "Developer_Comments", "Issue_ID", "Issue_key"]
     text_to_drop = [col for col in text_cols if col in X.columns]
     X = X.drop(columns=text_to_drop)
-    print(f"🚀 [INFO] Dropped text/ID columns: {text_to_drop}")
+    print(f"[INFO] Dropped text/ID columns: {text_to_drop}")
     
     # 5. Aggressive Text Purge & Robust Encoding
     # We drop any object/category column with > 15 unique values to prevent memory explosion and noise
@@ -52,17 +52,17 @@ def load_and_prepare_data(path):
             to_drop.append(col)
             
     if to_drop:
-        print(f"🚀 [INFO] Dropping high-cardinality/text columns (>15 unique): {to_drop}")
+        print(f"[INFO] Dropping high-cardinality/text columns (>15 unique): {to_drop}")
         X = X.drop(columns=to_drop)
         
     if to_encode:
-        print(f"🚀 [INFO] One-hot encoding categorical columns: {to_encode}")
+        print(f"[INFO] One-hot encoding categorical columns: {to_encode}")
         X = pd.get_dummies(X, columns=to_encode)
     
     # 6. Sanitize Feature Names for XGBoost
     # Replace illegal characters [, ], < with underscores
     X.columns = [re.sub(r'[\[\]<]', '_', str(c)) for c in X.columns]
-    print("🚀 [INFO] Sanitized feature names for XGBoost compatibility.")
+    print("[INFO] Sanitized feature names for XGBoost compatibility.")
     
     return X, y
 
@@ -74,7 +74,7 @@ def train_and_evaluate():
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.2, random_state=42, stratify=y
     )
-    print("🚀 [INFO] Data split into 80% train and 20% test sets.")
+    print("[INFO] Data split into 80% train and 20% test sets.")
 
     # 7. Handle Class Imbalance for XGBoost (Calculate weights)
     sample_weights = compute_sample_weight(class_weight="balanced", y=y_train)
@@ -87,7 +87,8 @@ def train_and_evaluate():
             class_weight="balanced"
         ),
         "XGBoost": XGBClassifier(
-        eval_metric="mlogloss", 
+        eval_metric="mlogloss",
+        base_score=0.5,      # Explicit scalar — avoids per-class vector that breaks SHAP
         random_state=42
         ),
     }
@@ -95,7 +96,7 @@ def train_and_evaluate():
     results = {}
 
     for name, model in models.items():
-        print(f"\n🚀 [INFO] Training {name} Classifier...")
+        print(f"\n[INFO] Training {name} Classifier...")
         
         if name == "XGBoost":
             model.fit(X_train, y_train, sample_weight=sample_weights)
@@ -116,14 +117,14 @@ def train_and_evaluate():
         results[name] = model
 
     # 9. Save Models
-    print("\n🚀 [INFO] Saving trained models to {}...".format(MODEL_DIR))
+    print("\n[INFO] Saving trained models to {}...".format(MODEL_DIR))
     joblib.dump(results["RandomForest"], RF_MODEL_PATH)
     joblib.dump(results["XGBoost"], XGB_MODEL_PATH)
-    print(f"✅ Saved: {RF_MODEL_PATH} and {XGB_MODEL_PATH}")
+    print(f"[SUCCESS] Saved: {RF_MODEL_PATH} and {XGB_MODEL_PATH}")
 
 if __name__ == "__main__":
     try:
         train_and_evaluate()
-        print("\n🚀 [SUCCESS] Training pipeline completed successfully.")
+        print("\n[SUCCESS] Training pipeline completed successfully.")
     except Exception as e:
-        print(f"\n❌ [ERROR] Training failed: {e}")
+        print(f"\n[ERROR] Training failed: {e}")
