@@ -7,3 +7,4 @@ __pycache__/
 .ipynb_checkpoints/
 .vscode/
 .venv/
+ai_risk_prediction_framework.egg-info/

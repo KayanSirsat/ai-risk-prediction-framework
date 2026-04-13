@@ -14,7 +14,7 @@ def load_and_sample_data(path, sample_size):
     print(f"[1/6] Loading data from {path}...")
     if not os.path.exists(path):
         # Create a dummy raw file if it doesn't exist to avoid crash
-        print("⚠️ Raw file not found. Creating dummy raw dataset for simulation.")
+        print("[WARNING] Raw file not found. Creating dummy raw dataset for simulation.")
         df = pd.DataFrame(
             {"Issue_ID": range(sample_size), "Summary": ["Draft issue"] * sample_size}
         )
