@@ -1,62 +1,57 @@
-"""
-Main Application Entry Point
-AI-Driven Risk Prediction Framework
-
-Handles authentication routing and page navigation with unified dark theme.
-"""
+"""Landing page for native Streamlit multipage app."""
 
 import streamlit as st
-import os
-import sys
 
-# Add parent directory to path for imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from app.utils.env import ensure_project_root
 
-# Page configuration - must be first Streamlit command
-st.set_page_config(
-    page_title="RiskAI - AI-Driven Risk Prediction",
-    page_icon="",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
+ensure_project_root()
 
-# Import components after page config
-from app.utils.styles import apply_custom_styles, render_header
+from app.utils.routes import DASHBOARD_PAGE, switch_page_safe
 from app.views.login import render_login_view
-from app.views.dashboard import render_dashboard
-from app.views.auditor import render_auditor
-from app.views.settings import render_settings
-from app.components.sidebar import render_sidebar
+
+st.set_page_config(initial_sidebar_state="collapsed", layout="centered")
 
 
-def main():
-    """Main application entry point."""
+def _inject_login_css(hide_sidebar: bool = True) -> None:
+    sidebar_css = (
+        '[data-testid="stSidebar"] { display: none !important; }\n'
+        '[data-testid="stSidebarNav"] { display: none !important; }'
+        if hide_sidebar
+        else ""
+    )
+    st.markdown(
+        """
+        <style>
+        """
+        + sidebar_css
+        + """
+            .stApp {
+                background: radial-gradient(circle at top left, #1e293b 0%, #0f172a 45%, #0b1220 100%);
+            }
+            .login-shell {
+                margin-top: 8vh;
+                border: 1px solid #334155;
+                border-radius: 12px;
+                padding: 24px;
+                background: #1e293b;
+            }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
-    # Apply global custom styles
-    apply_custom_styles()
 
-    # Initialize authentication state
+def main() -> None:
     if "authenticated" not in st.session_state:
         st.session_state.authenticated = False
 
-    # Routing logic
-    if not st.session_state.authenticated:
-        # Show login view
-        render_login_view()
-    else:
-        # Show authenticated application
-        selected_page = render_sidebar()
+    if st.session_state.authenticated:
+        _inject_login_css(hide_sidebar=False)
+        switch_page_safe(DASHBOARD_PAGE)
+        st.stop()
 
-        # Render global header
-        render_header()
-
-        # Route to selected page
-        if selected_page == "Overview":
-            render_dashboard()
-        elif selected_page == "Ticket Auditor":
-            render_auditor()
-        elif selected_page == "Settings":
-            render_settings()
+    _inject_login_css(hide_sidebar=True)
+    render_login_view()
 
 
 if __name__ == "__main__":
