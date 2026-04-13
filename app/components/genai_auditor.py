@@ -8,8 +8,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 NVIDIA_API_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
-MODEL_NAME = "qwen/qwen3.5-122b-a10b"
-API_KEY = os.getenv("NVIDIA_API_KEY")
+MODEL_NAME = "nvidia/llama-3.1-nemotron-70b-instruct"
 
 MAX_RETRIES = 3
 INITIAL_WAIT = 5
@@ -18,6 +17,13 @@ MITIGATION_TTL = 600
 
 
 def _call_nvidia_api(ticket_details, risk_level, shap_drivers):
+    api_key = os.getenv("NVIDIA_API_KEY")
+    if not api_key:
+        return {
+            "reasoning_trace": "NVIDIA_API_KEY not found in .env file.",
+            "final_strategy": "Unable to generate mitigation strategy. Add your NVIDIA API key to the .env file.",
+        }
+
     prompt = (
         f"You are an Agile Project Management Expert. "
         f"A Jira ticket has been flagged as {risk_level} Risk. "
@@ -40,7 +46,7 @@ def _call_nvidia_api(ticket_details, risk_level, shap_drivers):
     }
 
     headers = {
-        "Authorization": f"Bearer {API_KEY}",
+        "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
     }
 
@@ -81,12 +87,6 @@ def _call_nvidia_api(ticket_details, risk_level, shap_drivers):
                 "reasoning_trace": f"Unexpected API response format: {e}",
                 "final_strategy": "Unable to parse mitigation strategy from API response.",
             }
-
-    if not API_KEY:
-        return {
-            "reasoning_trace": "NVIDIA_API_KEY not found in .env file.",
-            "final_strategy": "Unable to generate mitigation strategy. Add your NVIDIA API key to the .env file.",
-        }
 
     reasoning_trace = ""
     final_strategy = ""
