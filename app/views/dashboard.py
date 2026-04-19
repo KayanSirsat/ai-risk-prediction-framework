@@ -123,6 +123,61 @@ def _build_alerts_table(anomaly_results: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(alerts)
 
 
+def _build_shap_proxy_table(anomaly_results: pd.DataFrame) -> pd.DataFrame:
+    """Build a proxy SHAP driver table from anomaly feature contributions."""
+    if anomaly_results.empty or "feature_contributions" not in anomaly_results.columns:
+        return pd.DataFrame(columns=["Feature", "Influence"])
+
+    anomalies = anomaly_results[anomaly_results["is_anomaly"]].copy()
+    if anomalies.empty:
+        return pd.DataFrame(columns=["Feature", "Influence"])
+
+    friendly_names = {
+        "budget_overrun_pct": "Budget Overrun %",
+        "days_overrun_pct": "Schedule Overrun %",
+        "efficiency_score": "Delivery Efficiency",
+        "cost_efficiency": "Cost Efficiency",
+        "Actual_Days": "Actual Days",
+        "Estimated_Days": "Estimated Days",
+        "Cost_Consumed": "Cost Consumed",
+        "Budget_Allocated": "Budget Allocated",
+        "Story_Points": "Story Points",
+    }
+
+    contribution_totals: dict[str, float] = {}
+    for raw in anomalies["feature_contributions"].astype(str).tolist():
+        if not raw or raw == "None":
+            continue
+        for segment in raw.split(","):
+            parts = segment.split(":", 1)
+            if len(parts) != 2:
+                continue
+            feature = parts[0].strip()
+            try:
+                magnitude = float(parts[1].strip())
+            except ValueError:
+                continue
+            contribution_totals[feature] = contribution_totals.get(feature, 0.0) + abs(
+                magnitude
+            )
+
+    if not contribution_totals:
+        return pd.DataFrame(columns=["Feature", "Influence"])
+
+    total = sum(contribution_totals.values()) or 1.0
+    rows = []
+    for feature, magnitude in sorted(
+        contribution_totals.items(), key=lambda item: item[1], reverse=True
+    )[:5]:
+        rows.append(
+            {
+                "Feature": friendly_names.get(feature, feature),
+                "Influence": f"{(magnitude / total) * 100:.1f}%",
+            }
+        )
+    return pd.DataFrame(rows)
+
+
 @st.cache_resource(show_spinner=False)
 def _load_dashboard_models(contamination: float, forecast_horizon: int) -> dict:
     LOGGER.info(
@@ -181,7 +236,7 @@ def _load_dashboard_models(contamination: float, forecast_horizon: int) -> dict:
     }
 
 
-def render_dashboard() -> None:
+def render_dashboard(show_topbar: bool = True) -> None:
     """Render the main dashboard overview page."""
     render_page_header(
         title="Dashboard Overview",
@@ -192,7 +247,7 @@ def render_dashboard() -> None:
     forecast_horizon = int(st.session_state.get("model_forecast_horizon", 14))
     risk_threshold_mode = st.session_state.get("model_risk_threshold", "Balanced")
 
-    controls_col, _ = st.columns([1, 5])
+    controls_col, _ = st.columns([1.5, 4.5])
     with controls_col:
         if st.button("Regenerate Models", use_container_width=True):
             st.cache_resource.clear()
@@ -247,7 +302,7 @@ def render_dashboard() -> None:
 
     st.markdown("<div style='height: 2rem'></div>", unsafe_allow_html=True)
 
-    col_left, col_right = st.columns([2, 1])
+    col_left, col_right = st.columns([3, 2])
 
     with col_left:
         render_section_header("Risk Distribution Over Time")
@@ -279,13 +334,19 @@ def render_dashboard() -> None:
         )
 
     with col_right:
-        render_section_header("Risk Breakdown")
+        render_section_header("Top Risk Drivers (SHAP Proxy)")
         if SEVERITY_FIG_PATH.exists():
             st.image(str(SEVERITY_FIG_PATH), use_container_width=True)
         else:
             st.warning(
                 "Severity figure not found. Run severity figure script to generate it."
             )
+
+        shap_proxy_df = _build_shap_proxy_table(dashboard_data["anomaly"])
+        if shap_proxy_df.empty:
+            st.info("No anomaly-linked feature contributions available yet.")
+        else:
+            st.dataframe(shap_proxy_df, hide_index=True, use_container_width=True)
 
         st.metric("ROC-AUC", f"{dashboard_data['roc_auc']:.3f}")
         st.caption("ROC-AUC compares domain labels vs anomaly score ranking.")
@@ -300,58 +361,31 @@ def render_dashboard() -> None:
 
 
 def _render_alerts_table(alerts_df: pd.DataFrame) -> None:
-    """Render anomaly alerts table with color-coded badges."""
+    """Render anomaly alerts table in a stable Streamlit grid."""
     if alerts_df.empty:
         st.info("No anomaly alerts available for the current settings.")
         return
 
-    rows_html = ""
-    for _, alert in alerts_df.iterrows():
-        severity_class = str(alert["severity"]).lower()
-        rows_html += f"""
-            <tr>
-                <td style="font-size: 0.875rem; color: {COLORS["text_secondary"]};">{alert["timestamp"]}</td>
-                <td>
-                    <code style="background: {COLORS["bg_elevated"]}; padding: 0.25rem 0.625rem;
-                                 border-radius: 6px; color: {COLORS["brand_light"]}; font-size: 0.8rem; font-weight: 600;">
-                        {alert["ticket"]}
-                    </code>
-                </td>
-                <td style="font-size: 0.875rem; color: {COLORS["text_secondary"]};">{alert["alert"]}</td>
-                <td><span class="badge badge-{severity_class}">{alert["severity"]}</span></td>
-                <td><span class="badge badge-info">{alert["status"]}</span></td>
-            </tr>
-        """
+    table_df = alerts_df[["timestamp", "ticket", "alert", "severity", "status"]].copy()
+    table_df.columns = ["Timestamp", "Ticket", "Alert Type", "Severity", "Status"]
+    st.dataframe(table_df, hide_index=True, use_container_width=True)
 
-    st.markdown(
-        f"""
-        <div style="background: {COLORS["bg_card"]}; border: 1px solid {COLORS["border_primary"]};
-                    border-radius: 12px; overflow: hidden; box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.3);">
-            <table style="width: 100%; border-collapse: collapse;">
-                <thead>
-                    <tr style="background: {COLORS["bg_elevated"]};">
-                        <th style="text-align: left; padding: 1rem; color: {COLORS["text_muted"]}; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;">Timestamp</th>
-                        <th style="text-align: left; padding: 1rem; color: {COLORS["text_muted"]}; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;">Ticket</th>
-                        <th style="text-align: left; padding: 1rem; color: {COLORS["text_muted"]}; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;">Alert Type</th>
-                        <th style="text-align: left; padding: 1rem; color: {COLORS["text_muted"]}; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;">Severity</th>
-                        <th style="text-align: left; padding: 1rem; color: {COLORS["text_muted"]}; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;">Status</th>
-                    </tr>
-                </thead>
-                <tbody>{rows_html}</tbody>
-            </table>
-        </div>
-        <style>
-            table tbody tr td {{
-                padding: 0.875rem 1rem;
-                border-bottom: 1px solid {COLORS["border_primary"]};
-            }}
-            table tbody tr:hover td {{
-                background: {COLORS["bg_elevated"]};
-            }}
-            table tbody tr:last-child td {{
-                border-bottom: none;
-            }}
-        </style>
-        """,
-        unsafe_allow_html=True,
+
+def render_forecasting_page(show_topbar: bool = True) -> None:
+    """Backward-compatible forecasting page entrypoint."""
+    if show_topbar:
+        st.caption("Forecasting page header is rendered by the calling page.")
+    st.info(
+        "Forecasting view is transitioning to the new Phase 2 layout. "
+        "Use Dashboard for full live forecasting metrics right now."
+    )
+
+
+def render_anomaly_page(show_topbar: bool = True) -> None:
+    """Backward-compatible anomaly page entrypoint."""
+    if show_topbar:
+        st.caption("Anomaly page header is rendered by the calling page.")
+    st.info(
+        "Anomaly triage board is transitioning to the new Phase 2 layout. "
+        "Use Dashboard for current anomaly detection outputs right now."
     )
