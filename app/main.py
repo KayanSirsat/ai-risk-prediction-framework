@@ -9,22 +9,23 @@ ensure_project_root()
 from app.utils.routes import DASHBOARD_PAGE, switch_page_safe
 from app.views.login import render_login_view
 
-st.set_page_config(initial_sidebar_state="collapsed", layout="centered")
+st.set_page_config(initial_sidebar_state="expanded", layout="centered")
+st.markdown(
+    """
+    <style>
+    /* Hide sidebar and expand/collapse controls on login page only */
+    [data-testid="stSidebar"] { display: none !important; }
+    [data-testid="collapsedControl"] { display: none !important; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 
-def _inject_login_css(hide_sidebar: bool = True) -> None:
-    sidebar_css = (
-        '[data-testid="stSidebar"] { display: none !important; }\n'
-        '[data-testid="stSidebarNav"] { display: none !important; }'
-        if hide_sidebar
-        else ""
-    )
+def _inject_login_css() -> None:
     st.markdown(
         """
         <style>
-        """
-        + sidebar_css
-        + """
             .stApp {
                 background: radial-gradient(circle at top left, #1e293b 0%, #0f172a 45%, #0b1220 100%);
             }
@@ -46,11 +47,10 @@ def main() -> None:
         st.session_state.authenticated = False
 
     if st.session_state.authenticated:
-        _inject_login_css(hide_sidebar=False)
         switch_page_safe(DASHBOARD_PAGE)
         st.stop()
 
-    _inject_login_css(hide_sidebar=True)
+    _inject_login_css()
     render_login_view()
 
 

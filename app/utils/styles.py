@@ -77,8 +77,12 @@ def apply_custom_styles():
         }}
         
         .main .block-container {{
-            padding: 2.5rem 3rem;
+            padding: 1rem 3rem 2rem;
             max-width: 1400px;
+        }}
+
+        section[data-testid="stMain"] > div:first-child {{
+            padding-top: 0rem !important;
         }}
         
         /* ============================================
@@ -232,6 +236,63 @@ def apply_custom_styles():
         
         [data-testid="stSidebar"] .stRadio > div > label > div:first-child {{
             display: none;
+        }}
+
+        .section-title {{
+            color: {COLORS["text_muted"]};
+            font-size: 0.72rem;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            margin: 0.85rem 0 0.4rem 0;
+        }}
+
+        .sidebar-spacer {{
+            flex-grow: 1;
+            min-height: 0.5rem;
+        }}
+
+        .user-zone {{
+            border-top: 1px solid {COLORS["border_primary"]};
+            padding-top: 0.75rem;
+            margin-top: 0.75rem;
+        }}
+
+        .user-card {{
+            display: flex;
+            align-items: center;
+            gap: 0.65rem;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid {COLORS["border_primary"]};
+            border-radius: 10px;
+            padding: 0.65rem 0.75rem;
+        }}
+
+        .user-avatar {{
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.82rem;
+            font-weight: 700;
+            color: #ffffff;
+        }}
+
+        .user-meta-name {{
+            color: {COLORS["text_primary"]};
+            font-size: 0.82rem;
+            font-weight: 600;
+            line-height: 1.2;
+        }}
+
+        .user-meta-role {{
+            color: {COLORS["text_muted"]};
+            font-size: 0.72rem;
+            margin-top: 0.1rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
         }}
         
         /* ============================================
@@ -592,6 +653,61 @@ def apply_custom_styles():
     """,
         unsafe_allow_html=True,
     )
+
+
+def inject_global_css() -> None:
+    """Inject global CSS on every script run to defeat Streamlit's DOM redraw on page switches."""
+    apply_custom_styles()
+    st.markdown(
+        """
+        <style>
+        /* Force sidebar visibility and override Streamlit's native collapse transforms */
+        [data-testid="stSidebar"] {
+            display: flex !important;
+            width: 240px !important;
+            min-width: 240px !important;
+            transform: none !important;
+            margin-left: 0 !important;
+            visibility: visible !important;
+            background-color: #0D2137 !important;
+        }
+        /* Remove default top padding from the sidebar content container */
+        [data-testid="stSidebarUserContent"] { padding-top: 0rem !important; }
+        [data-testid="stSidebar"] > div:first-child { padding-top: 0rem !important; }
+        [data-testid="stSidebarUserContent"] {
+            display: flex !important;
+            flex-direction: column !important;
+            min-height: 100vh !important;
+            height: 100vh !important;
+        }
+        /* Hide the broken native collapse/expand chevron globally */
+        [data-testid="collapsedControl"] { display: none !important; }
+        [data-testid="stSidebarNav"] {
+            display: none !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_top_bar(title: str) -> None:
+    """Render a compact top bar title for page consistency."""
+    st.markdown(
+        f"""
+        <div style="display:flex;justify-content:space-between;align-items:center;margin:0 0 12px 0;">
+            <div style="font-size:13px;font-weight:600;color:{COLORS["text_secondary"]};">
+                Risk Framework &gt; {title}
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_topbar(title: str) -> None:
+    """Backward-compatible alias used by page modules."""
+    render_top_bar(title)
 
 
 def render_header():

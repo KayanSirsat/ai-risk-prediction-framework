@@ -10,6 +10,7 @@ MAIN_PAGE = "main.py"
 DASHBOARD_PAGE = "pages/1_Dashboard.py"
 FORECASTING_PAGE = "pages/2_Forecasting.py"
 ANOMALY_PAGE = "pages/3_Anomaly_Detection.py"
+WHAT_IF_PAGE = "pages/4_What_If_Simulation.py"
 
 
 def page_candidates(path: str) -> list[str]:
