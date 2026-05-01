@@ -649,6 +649,18 @@ def apply_custom_styles():
             border-radius: 6px;
             transition: width 0.3s ease;
         }}
+
+        .auditor-sticky-title {{
+            position: sticky;
+            top: 0;
+            z-index: 5;
+            background: {COLORS["bg_primary"]};
+            color: {COLORS["text_primary"]};
+            font-weight: 600;
+            padding: 0.5rem 0;
+            border-bottom: 1px solid {COLORS["border_primary"]};
+            margin-bottom: 0.25rem;
+        }}
     </style>
     """,
         unsafe_allow_html=True,

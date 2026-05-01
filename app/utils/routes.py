@@ -11,6 +11,9 @@ DASHBOARD_PAGE = "pages/1_Dashboard.py"
 FORECASTING_PAGE = "pages/2_Forecasting.py"
 ANOMALY_PAGE = "pages/3_Anomaly_Detection.py"
 WHAT_IF_PAGE = "pages/4_What_If_Simulation.py"
+SETTINGS_PAGE = "pages/5_Settings.py"
+JIRA_SYNC_PAGE = "pages/6_Jira_Sync.py"
+AUDITOR_PAGE = "pages/7_Ticket_Auditor.py"
 
 
 def page_candidates(path: str) -> list[str]:

@@ -17,6 +17,7 @@ PAGE_PATHS = {
     "what_if": "pages/4_What_If_Simulation.py",
     "jira_sync": "pages/6_Jira_Sync.py",
     "settings": "pages/5_Settings.py",
+    "auditor": "pages/7_Ticket_Auditor.py",
 }
 
 
@@ -71,6 +72,7 @@ def render_sidebar() -> None:
         )
         _link(PAGE_PATHS["forecasting"], "Forecasting Lab", "📈")
         _link(PAGE_PATHS["anomaly"], "Anomaly Triage", "🚨")
+        _link(PAGE_PATHS["auditor"], "Ticket Auditor", "🧠")
         _link(PAGE_PATHS["what_if"], "What-If Simulation", "🧪")
 
         st.markdown(
