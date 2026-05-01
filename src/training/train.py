@@ -122,6 +122,14 @@ def train_and_evaluate():
     joblib.dump(results["XGBoost"], XGB_MODEL_PATH)
     print(f"[SUCCESS] Saved: {RF_MODEL_PATH} and {XGB_MODEL_PATH}")
 
+    # 10. Save feature column names for Ticket Auditor alignment
+    # ticket_viewer._preprocess_row() uses this to ensure inference
+    # features exactly match the training feature space.
+    FEATURE_COLUMNS_PATH = os.path.join(MODEL_DIR, "feature_columns.pkl")
+    joblib.dump(list(X.columns), FEATURE_COLUMNS_PATH)
+    print(f"[SUCCESS] Saved feature column names to {FEATURE_COLUMNS_PATH}")
+    print(f"[INFO] Training feature columns ({len(X.columns)}): {list(X.columns)}")
+
 if __name__ == "__main__":
     try:
         train_and_evaluate()

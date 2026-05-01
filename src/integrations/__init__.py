@@ -1,11 +1,6 @@
-"""
-Integrations Module
-Phase 2-E/F: External System Integration (Jira, OAuth, etc).
+"""Integration exports for Jira and OAuth clients."""
 
-Placeholder for Phase 2-E/F implementation. Will include:
-- Jira ticket synchronization
-- OAuth authentication providers
-- Third-party API integrations
-"""
+from src.integrations.jira_client import JiraAPIClient, JiraCredentials
+from src.integrations.oauth_handler import JiraOAuthHandler
 
-__all__ = []
+__all__ = ["JiraAPIClient", "JiraCredentials", "JiraOAuthHandler"]

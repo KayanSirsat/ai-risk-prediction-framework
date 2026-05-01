@@ -11,6 +11,8 @@ from typing import Any, Dict, List, Optional
 from urllib import parse, request
 from urllib.error import HTTPError, URLError
 
+from src.integrations.oauth_handler import JiraOAuthHandler
+
 
 class JiraConnectionError(Exception):
     """Raised when Jira connectivity fails."""
@@ -40,6 +42,8 @@ class JiraCredentials:
     project_key: str
     access_token: str = ""
     cloud_id: str = ""
+    refresh_token: str = ""
+    token_expires_at: float = 0.0
 
 
 class JiraAPIClient:
@@ -53,6 +57,9 @@ class JiraAPIClient:
         project_key: str = "",
         access_token: str = "",
         cloud_id: str = "",
+        refresh_token: str = "",
+        token_expires_at: float = 0.0,
+        oauth_handler: Optional[JiraOAuthHandler] = None,
         timeout_seconds: int = 20,
     ) -> None:
         has_basic = bool(user_email and api_token)
@@ -67,8 +74,11 @@ class JiraAPIClient:
             project_key=project_key,
             access_token=access_token,
             cloud_id=cloud_id,
+            refresh_token=refresh_token,
+            token_expires_at=float(token_expires_at or 0.0),
         )
         self.timeout_seconds = timeout_seconds
+        self.oauth_handler = oauth_handler
         self.logger = self._setup_logger()
 
     def _setup_logger(self) -> logging.Logger:
@@ -89,6 +99,7 @@ class JiraAPIClient:
 
     def _auth_header(self) -> Dict[str, str]:
         if self.credentials.access_token:
+            self._ensure_valid_oauth_token()
             return {
                 "Authorization": f"Bearer {self.credentials.access_token}",
                 "Accept": "application/json",
@@ -108,6 +119,31 @@ class JiraAPIClient:
             "Accept": "application/json",
             "Content-Type": "application/json",
         }
+
+    def _ensure_valid_oauth_token(self) -> None:
+        if not self.credentials.access_token:
+            return
+
+        if not self.credentials.token_expires_at:
+            return
+
+        if not JiraOAuthHandler.is_token_expired(self.credentials.token_expires_at):
+            return
+
+        if not self.oauth_handler or not self.credentials.refresh_token:
+            raise JiraConnectionError(
+                "Jira OAuth token expired and refresh configuration is missing"
+            )
+
+        refreshed = self.oauth_handler.refresh_access_token(
+            self.credentials.refresh_token
+        )
+        self.update_oauth_credentials(
+            access_token=refreshed.get("access_token", ""),
+            refresh_token=refreshed.get("refresh_token")
+            or self.credentials.refresh_token,
+            token_expires_at=float(refreshed.get("expires_at", 0.0)),
+        )
 
     def _request_json(
         self, endpoint: str, params: Optional[Dict[str, Any]] = None
@@ -180,6 +216,49 @@ class JiraAPIClient:
 
         self.logger.info("Fetched %d Jira issues", len(issues))
         return issues
+
+    def default_jql(self) -> str:
+        """Return default project-scoped JQL for active issues."""
+        return (
+            f"project = {self.credentials.project_key} "
+            "AND statusCategory != Done ORDER BY updated DESC"
+        )
+
+    def sync_issues(
+        self,
+        jql_query: Optional[str] = None,
+        max_results: int = 250,
+    ) -> List[Dict[str, Any]]:
+        """Fetch Jira issues and convert to model-ready metric rows."""
+        query = (jql_query or "").strip() or self.default_jql()
+        issues = self.fetch_issues(query, max_results=max_results)
+        return self.issues_to_metrics(issues)
+
+    def issues_to_metrics(self, issues: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Convert raw Jira payload list into model-ready metric rows."""
+        rows: List[Dict[str, Any]] = []
+        for issue in issues:
+            row = self.extract_metrics(issue)
+            row["Issue_key"] = issue.get("key", "")
+            row["Issue_ID"] = issue.get("id", "")
+            rows.append(row)
+        return rows
+
+    def update_oauth_credentials(
+        self,
+        access_token: str,
+        refresh_token: Optional[str] = None,
+        token_expires_at: float = 0.0,
+        cloud_id: Optional[str] = None,
+    ) -> None:
+        """Update OAuth credentials after code exchange or refresh."""
+        self.credentials.access_token = access_token
+        if refresh_token is not None:
+            self.credentials.refresh_token = refresh_token
+        if token_expires_at:
+            self.credentials.token_expires_at = float(token_expires_at)
+        if cloud_id is not None:
+            self.credentials.cloud_id = cloud_id
 
     def fetch_issue_by_key(self, issue_key: str) -> Dict[str, Any]:
         """Fetch a single issue by Jira key."""

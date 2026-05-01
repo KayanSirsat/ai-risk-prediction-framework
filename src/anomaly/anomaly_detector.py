@@ -6,6 +6,7 @@ to identify unusual patterns in project management data.
 """
 
 import logging
+import os
 import time
 from datetime import datetime
 from typing import List, Dict, Optional, Tuple
@@ -17,6 +18,9 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.impute import SimpleImputer
 import joblib
 
+
+# Ensure logs directory exists before configuring file handler
+os.makedirs("logs", exist_ok=True)
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -110,7 +114,7 @@ class AnomalyEngine:
         self,
         data: pd.DataFrame,
         feature_columns: List[str],
-        contamination: float = 0.05,
+        contamination: Optional[float] = None,
     ) -> pd.DataFrame:
         """
         Detect anomalies in the provided dataset using Isolation Forest.
@@ -129,9 +133,19 @@ class AnomalyEngine:
         """
         start_time = time.perf_counter()
 
+        # Use instance contamination if not overridden
+        if contamination is None:
+            contamination = self.contamination
+
         # Validate inputs
         if not 0.01 <= contamination <= 0.15:
             raise ValueError("contamination must be between 0.01 and 0.15")
+
+        # Re-initialize model if contamination differs from default
+        if contamination != self.contamination:
+            self.isolation_forest = IsolationForest(
+                contamination=contamination, random_state=42, n_estimators=100
+            )
 
         if len(data) < 100:
             raise ValueError(

@@ -10,7 +10,8 @@ from sklearn.preprocessing import label_binarize
 
 # Constants
 DATA_PATH = "data/ml_ready_data.csv"
-MODEL_PATH = "models/xgb_model.pkl"
+MODEL_DIR = "models/"
+MODEL_PATH = os.path.join(MODEL_DIR, "xgb_model.pkl")
 OUTPUT_DIR = "app/components/"
 CM_PATH = os.path.join(OUTPUT_DIR, "confusion_matrix.png")
 ROC_PATH = os.path.join(OUTPUT_DIR, "roc_curve.png")
@@ -51,40 +52,51 @@ def generate_publication_plots():
     if hasattr(pipeline, "named_steps"):
         preprocessor = pipeline.named_steps["preprocessor"]
         classifier = pipeline.named_steps["classifier"]
+        X_test_transformed = preprocessor.transform(X_test)
     else:
         # If only the classifier was saved, we need to handle preprocessing manually
         print("[WARN] Loaded object is a classifier, not a full pipeline.")
         print("[INFO] Applying manual preprocessing for compatibility...")
         classifier = pipeline
 
-        # Manual preprocessing matching the training pipeline
-        from sklearn.preprocessing import OneHotEncoder, StandardScaler
-        from sklearn.feature_extraction.text import TfidfVectorizer
+        # Manual preprocessing matching the training pipeline exactly (train.py)
+        import re
 
-        # Drop text columns for now (would need TF-IDF for full compatibility)
-        text_cols = [
-            c
-            for c in X_test.columns
-            if c in ["Summary", "Description", "text_combined"]
-        ]
-        cat_cols = [
-            c
-            for c in ["Priority", "Issue_Type", "Assignee_Seniority"]
-            if c in X_test.columns
-        ]
-        num_cols = [
-            c
-            for c in ["Estimated_Days", "Story_Points", "Budget_Allocated"]
-            if c in X_test.columns
-        ]
+        X_prep = X_test.copy()
 
-        # Simple encoding for compatibility
-        X_test_processed = X_test[num_cols].copy()
-        if cat_cols:
-            X_test_cat = pd.get_dummies(X_test[cat_cols], drop_first=False)
-            X_test_processed = pd.concat([X_test_processed, X_test_cat], axis=1)
+        # Drop leakage columns (same as train.py)
+        leakage_cols = ["Actual_Days", "Cost_Consumed"]
+        X_prep = X_prep.drop(columns=[c for c in leakage_cols if c in X_prep.columns])
 
-        X_test_transformed = X_test_processed.values
+        # Drop text/ID columns (same as train.py)
+        text_cols = ["Summary", "Description", "Developer_Comments", "Issue_ID", "Issue_key"]
+        X_prep = X_prep.drop(columns=[c for c in text_cols if c in X_prep.columns])
+
+        # Encode categoricals with <= 15 unique values; drop the rest
+        categorical_cols = X_prep.select_dtypes(include=["object", "category"]).columns
+        to_encode, to_drop = [], []
+        for col in categorical_cols:
+            if X_prep[col].nunique() <= 15:
+                to_encode.append(col)
+            else:
+                to_drop.append(col)
+        if to_drop:
+            X_prep = X_prep.drop(columns=to_drop)
+        if to_encode:
+            X_prep = pd.get_dummies(X_prep, columns=to_encode)
+
+        # Sanitize feature names (same as train.py)
+        X_prep.columns = [re.sub(r"[\[\]<]", "_", str(c)) for c in X_prep.columns]
+
+        # Align columns to training feature set via feature_columns.pkl if available
+        import joblib as _jl
+        import os as _os
+        feat_col_path = os.path.join(MODEL_DIR, "feature_columns.pkl")
+        if _os.path.exists(feat_col_path):
+            training_columns = _jl.load(feat_col_path)
+            X_prep = X_prep.reindex(columns=training_columns, fill_value=0)
+
+        X_test_transformed = X_prep.values
 
     y_pred = classifier.predict(X_test_transformed)
     # Ensure y_pred is numeric for the confusion matrix

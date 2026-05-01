@@ -162,16 +162,16 @@ class ProjectForecaster:
         try:
             # Validate input data
             self._validate_data(data, metric_column)
-            
+
             # Normalize dates if needed
             df_normalized = self._normalize_dates(data, date_column)
-            
+
             # Prepare Prophet format (ds, y)
             df_prophet = self._prepare_prophet_data(df_normalized, metric_column, date_column)
-            
+
             # Initialize and fit model
             model = self._initialize_model()
-            model = self._fit_model(df_prophet)
+            model = self._fit_model(df_prophet, model)
             
             # Generate forecast
             future = model.make_future_dataframe(periods=periods)
@@ -328,18 +328,9 @@ class ProjectForecaster:
         
         return model
     
-    def _fit_model(self, df_prophet: pd.DataFrame) -> Prophet:
+    def _fit_model(self, df_prophet: pd.DataFrame, model: Prophet) -> Prophet:
         """Fit Prophet model with error handling."""
         try:
-            model = Prophet()  # Create fresh model for fitting
-            # Add sprint seasonality to this model too
-            if self.enable_sprint_seasonality:
-                model.add_seasonality(
-                    name='sprint',
-                    period=self.config['sprint_period'],
-                    fourier_order=self.config['sprint_fourier_order']
-                )
-            
             model.fit(df_prophet)
             self.logger.info("Model fitted successfully")
             return model
@@ -405,9 +396,12 @@ class ProjectForecaster:
         forecast: pd.DataFrame
     ) -> pd.DataFrame:
         """Extract trend and seasonality components."""
-        # Prophet's built-in component extraction
-        components = forecast[['ds', 'trend', 'weekly', 'sprint', 'yhat']].copy()
-        return components
+        available_cols = ['ds', 'trend', 'yhat']
+        if 'weekly' in forecast.columns:
+            available_cols.append('weekly')
+        if 'sprint' in forecast.columns:
+            available_cols.append('sprint')
+        return forecast[available_cols].copy()
     
     def _build_metadata(
         self,
