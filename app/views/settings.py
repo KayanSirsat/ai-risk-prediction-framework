@@ -5,13 +5,58 @@ AI-Driven Risk Prediction Framework
 User preferences, integrations, and model configuration.
 """
 
+import json
+from pathlib import Path
+
 import streamlit as st
 
 from app.utils.styles import render_page_header, COLORS
 
+_SETTINGS_FILE = Path(__file__).resolve().parents[2] / "logs" / "user_settings.json"
+
+# Keys that are persisted across sessions
+_PERSISTENT_KEYS = [
+    "settings_name",
+    "settings_email",
+    "settings_role",
+    "notif_email_high_risk",
+    "notif_anomaly",
+    "notif_weekly_digest",
+    "notif_slack",
+    "jira_url",
+    "jira_project_key",
+    "model_anomaly_sensitivity",
+    "model_forecast_horizon",
+    "model_risk_threshold",
+    "model_genai_provider",
+]
+
+
+def _load_saved_settings() -> None:
+    """Load previously saved settings into session_state (only if not already set)."""
+    if not _SETTINGS_FILE.exists():
+        return
+    try:
+        saved = json.loads(_SETTINGS_FILE.read_text(encoding="utf-8"))
+        for key, value in saved.items():
+            if key not in st.session_state:
+                st.session_state[key] = value
+    except (json.JSONDecodeError, OSError):
+        pass  # Silently ignore corrupt settings file
+
+
+def _save_current_settings() -> None:
+    """Persist current widget values to disk."""
+    _SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    snapshot = {k: st.session_state.get(k) for k in _PERSISTENT_KEYS if k in st.session_state}
+    _SETTINGS_FILE.write_text(json.dumps(snapshot, indent=2, default=str), encoding="utf-8")
+
 
 def render_settings():
     """Render the settings page with card-based layout."""
+
+    # Load persisted values into session_state before widgets render
+    _load_saved_settings()
 
     # Page header
     render_page_header(
@@ -42,7 +87,12 @@ def render_settings():
     col_save, col_spacer = st.columns([1, 3])
     with col_save:
         if st.button("Save Settings", type="primary", use_container_width=True):
-            st.success("Settings saved successfully.")
+            _save_current_settings()
+            st.success(
+                f"Settings saved successfully to `{_SETTINGS_FILE.relative_to(Path.cwd()) if _SETTINGS_FILE.is_relative_to(Path.cwd()) else _SETTINGS_FILE}`. "
+                "They will be restored on your next session."
+            )
+
 
 
 def _render_profile_settings():
@@ -154,13 +204,23 @@ def _render_jira_settings():
         col1, col2 = st.columns(2)
         with col1:
             if st.button("Test Connection", key="test_jira", use_container_width=True):
-                st.info("Connection test will be implemented in Phase 2.")
+                jira_url = st.session_state.get("jira_url", "")
+                if jira_url:
+                    st.info(
+                        "Connection is validated via OAuth on the **Jira Sync** page. "
+                        "Navigate to **Page 6 → Jira Sync** to authorize and test."
+                    )
+                else:
+                    st.warning("Enter a Jira Instance URL above first.")
 
         with col2:
             if st.button(
-                "Sync Now", key="sync_jira", type="secondary", use_container_width=True
+                "Go to Jira Sync", key="sync_jira", type="secondary", use_container_width=True
             ):
-                st.info("Manual sync will be implemented in Phase 2.")
+                from app.utils.routes import JIRA_SYNC_PAGE, switch_page_safe
+                switched = switch_page_safe(JIRA_SYNC_PAGE)
+                if not switched:
+                    st.info("Navigate to **Page 6 → Jira Sync** in the sidebar.")
 
 
 def _render_model_settings():

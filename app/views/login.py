@@ -3,10 +3,52 @@ Login/Signup View Component
 AI-Driven Risk Prediction Framework
 
 Dark themed authentication interface with indigo accents.
+User credentials are persisted to logs/demo_users.json for demo purposes.
 """
+
+import hashlib
+import json
+from pathlib import Path
 
 import streamlit as st
 from app.utils.styles import COLORS
+
+# Demo user store — JSON file for persistence across Streamlit reruns
+_USER_STORE = Path(__file__).resolve().parents[2] / "logs" / "demo_users.json"
+
+_DEFAULT_USERS = {
+    "admin": {
+        "password_hash": hashlib.sha256(b"admin").hexdigest(),
+        "full_name": "Admin User",
+        "email": "admin@riskai.io",
+        "role": "Administrator",
+    }
+}
+
+
+def _hash(password: str) -> str:
+    return hashlib.sha256(password.encode()).hexdigest()
+
+
+def _load_users() -> dict:
+    """Load user store from disk, falling back to defaults."""
+    if not _USER_STORE.exists():
+        return dict(_DEFAULT_USERS)
+    try:
+        data = json.loads(_USER_STORE.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            return dict(_DEFAULT_USERS)
+        # Always ensure admin exists
+        data.setdefault("admin", _DEFAULT_USERS["admin"])
+        return data
+    except (json.JSONDecodeError, OSError):
+        return dict(_DEFAULT_USERS)
+
+
+def _save_users(users: dict) -> None:
+    """Persist user store to disk."""
+    _USER_STORE.parent.mkdir(parents=True, exist_ok=True)
+    _USER_STORE.write_text(json.dumps(users, indent=2), encoding="utf-8")
 
 
 def get_login_styles() -> str:
@@ -349,7 +391,7 @@ def _render_signup_form():
 
 
 def _handle_login(username: str, password: str):
-    """Handle login authentication."""
+    """Authenticate against persisted user store."""
 
     st.session_state.login_error = None
 
@@ -358,26 +400,28 @@ def _handle_login(username: str, password: str):
         st.rerun()
         return
 
-    # Mock authentication
-    if username == "admin" and password == "admin":
+    users = _load_users()
+    user_record = users.get(username.strip())
+
+    if user_record and user_record.get("password_hash") == _hash(password):
         st.session_state.authenticated = True
         st.session_state.user = {
             "username": username,
-            "full_name": "Admin User",
-            "email": "admin@riskai.io",
-            "role": "Administrator",
+            "full_name": user_record.get("full_name", username),
+            "email": user_record.get("email", ""),
+            "role": user_record.get("role", "Viewer"),
         }
         st.session_state.login_error = None
         st.rerun()
     else:
-        st.session_state.login_error = "Invalid credentials. Use admin / admin."
+        st.session_state.login_error = "Invalid credentials. Please check your username and password."
         st.rerun()
 
 
 def _handle_signup(
     full_name: str, email: str, username: str, password: str, confirm_password: str
 ):
-    """Handle user signup."""
+    """Register a new user and persist to user store."""
 
     st.session_state.login_error = None
 
@@ -396,7 +440,23 @@ def _handle_signup(
         st.rerun()
         return
 
-    # Mock signup success
+    username = username.strip()
+    users = _load_users()
+
+    if username in users:
+        st.session_state.login_error = f"Username '{username}' is already taken. Please choose another."
+        st.rerun()
+        return
+
+    # Register new user
+    users[username] = {
+        "password_hash": _hash(password),
+        "full_name": full_name.strip(),
+        "email": email.strip(),
+        "role": "Project Manager",
+    }
+    _save_users(users)
+
     st.session_state.signup_success = True
     st.session_state.auth_mode = "login"
     st.rerun()

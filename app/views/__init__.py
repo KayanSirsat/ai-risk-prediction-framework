@@ -17,16 +17,20 @@ if TYPE_CHECKING:
         render_dashboard,
         render_forecasting_page,
     )
+    from app.views.jira_sync import render_jira_sync_page
     from app.views.login import render_login_view
     from app.views.settings import render_settings
+    from app.views.what_if import render_what_if_page
 
 __all__ = [
     "render_auditor",
     "render_anomaly_page",
     "render_dashboard",
     "render_forecasting_page",
+    "render_jira_sync_page",
     "render_login_view",
     "render_settings",
+    "render_what_if_page",
 ]
 
 _LAZY_MAP: dict[str, str] = {
@@ -34,8 +38,10 @@ _LAZY_MAP: dict[str, str] = {
     "render_anomaly_page": "app.views.dashboard",
     "render_dashboard": "app.views.dashboard",
     "render_forecasting_page": "app.views.dashboard",
+    "render_jira_sync_page": "app.views.jira_sync",
     "render_login_view": "app.views.login",
     "render_settings": "app.views.settings",
+    "render_what_if_page": "app.views.what_if",
 }
 
 
