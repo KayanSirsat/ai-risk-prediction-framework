@@ -1,198 +1,141 @@
-# Architecture - AI-Driven Risk Prediction Framework
+# Architecture — AI-Driven Risk Prediction Framework
 
-## Overview
+**Version:** 2.1.0 | **Status:** Production-Ready
 
-The AI-Driven Risk Prediction Framework is a comprehensive AI/ML system designed to predict, analyze, and mitigate project risks. The architecture follows a modular, scalable design that enables seamless integration of new features and Phase 2 advanced analytics.
+---
 
-## Directory Structure
+## System Overview
+
+The framework follows a **3-layer architecture**: Streamlit presentation, domain-first ML/AI intelligence, and external services.
+
+---
+
+## Directory Structure (Actual — Post Restructuring)
 
 ```
-src/
-├── __init__.py                 # Main package exports
-├── config.py                   # Global configuration
-├── models/                     # Core ML models
-│   ├── __init__.py
-│   ├── nlp_risk_engine.py     # NLP-based risk detection (Phase 2-C)
-│   ├── anomaly_detector.py    # Anomaly detection engine
-│   ├── risk_classifier.py     # Risk classification model
-│   └── train.py               # Model training pipeline
-├── forecasting/                # Time-series forecasting (Phase 2-A)
-│   ├── __init__.py
-│   └── forecast.py            # Prophet-based forecasting
-├── nlp/                        # Natural Language Processing
-│   ├── __init__.py
-│   └── text_risk_detector.py  # Text risk analysis
-├── preprocessing/              # Data preparation
-│   ├── __init__.py
-│   ├── data_pipeline.py       # Data pipeline orchestration
-│   └── preprocess.py          # Feature engineering
-├── xai/                        # Explainable AI
-│   ├── __init__.py
-│   └── shap_explainer.py      # SHAP model explanations
-├── mitigation/                 # Risk mitigation
-│   ├── __init__.py
-│   └── llm_agent.py           # LLM-based mitigation agent
-├── anomaly/                    # Phase 2-B (Placeholder)
-│   └── __init__.py
-├── simulation/                 # Phase 2-D (Placeholder)
-│   └── __init__.py
-└── integrations/               # Phase 2-E/F (Placeholder)
-    └── __init__.py
-
-tests/
-├── __init__.py
-├── conftest.py                # Pytest configuration & fixtures
-├── unit/                       # Unit tests
-│   ├── __init__.py
-│   ├── test_nlp_risk_engine.py
-│   ├── test_nlp_tokenizer_fix.py
-│   └── test_anomaly_engine.py
-└── integration/                # Integration tests
-    ├── __init__.py
-    ├── test_nlp_integration.py
-    └── benchmark_nlp_engine.py
+ai-risk-prediction-framework/
+├── app/                            # Streamlit frontend
+│   ├── main.py                     # Entry point (login gate)
+│   ├── pages/                      # 7 Streamlit MPA pages
+│   │   ├── 1_Dashboard.py
+│   │   ├── 2_Forecasting.py        # Phase 2-A
+│   │   ├── 3_Anomaly_Detection.py  # Phase 2-B
+│   │   ├── 4_What_If_Simulation.py # Phase 2-D
+│   │   ├── 5_Settings.py
+│   │   ├── 6_Jira_Sync.py          # Phase 2-E/F
+│   │   └── 7_Ticket_Auditor.py
+│   ├── views/                      # Page view logic
+│   │   ├── dashboard.py            # Dashboard + Forecasting + Anomaly views
+│   │   ├── auditor.py
+│   │   ├── what_if.py
+│   │   ├── jira_sync.py
+│   │   ├── login.py
+│   │   └── settings.py
+│   ├── components/                 # Reusable UI components
+│   │   ├── genai_auditor.py
+│   │   ├── shap_visuals.py
+│   │   ├── simulation_viewer.py
+│   │   ├── ticket_viewer.py
+│   │   └── audit_trail_viewer.py
+│   └── utils/
+│       ├── styles.py               # Design system (COLORS dict, CSS, headers)
+│       ├── routes.py               # Safe page navigation
+│       ├── sidebar.py
+│       ├── audit_storage.py
+│       └── env.py
+│
+├── src/                            # Backend — domain-first architecture
+│   ├── preprocessing/
+│   │   └── data_pipeline.py        # Synthetic data + feature engineering
+│   ├── training/
+│   │   ├── train.py                # XGBoost + RF training pipeline
+│   │   └── generate_paper_plots.py # IEEE ROC-AUC + Confusion Matrix
+│   ├── xai/
+│   │   └── shap_explainer.py       # SHAP TreeExplainer
+│   ├── mitigation/
+│   │   └── llm_agent.py            # Qwen 3.5 GenAI agent (NVIDIA API)
+│   ├── forecasting/
+│   │   └── forecast.py             # ProjectForecaster (Prophet)
+│   ├── anomaly/
+│   │   └── anomaly_detector.py     # AnomalyEngine (Isolation Forest)
+│   ├── nlp/
+│   │   └── nlp_risk_engine.py      # RiskNLPEngine (spaCy + TF-IDF)
+│   ├── simulation/
+│   │   └── what_if_simulator.py    # WhatIfSimulator
+│   └── integrations/
+│       ├── jira_client.py          # JiraAPIClient (REST v3)
+│       └── oauth_handler.py        # JiraOAuthHandler (3LO OAuth 2.0)
+│
+├── models/                         # Serialized artefacts
+│   ├── xgb_model.pkl
+│   ├── rf_model.pkl
+│   ├── isolation_forest.pkl
+│   └── feature_columns.pkl
+│
+├── tests/
+│   ├── unit/                       # 5 files, 54 tests
+│   └── integration/                # 4 files, 22 tests
+│
+├── docs/                           # PRDs, architecture, compliance
+└── reports/                        # Phase 2 diagnostic figures
 ```
+
+---
 
 ## Key Modules
 
-### 1. Models (`src/models/`)
+| Class | Module | Purpose |
+|-------|--------|---------|
+| `ProjectForecaster` | `src/forecasting/forecast.py` | Prophet + 14-day sprint seasonality |
+| `AnomalyEngine` | `src/anomaly/anomaly_detector.py` | Isolation Forest, severity tiers, z-score contributions |
+| `RiskNLPEngine` | `src/nlp/nlp_risk_engine.py` | spaCy entity extraction + TF-IDF risk scoring |
+| `WhatIfSimulator` | `src/simulation/what_if_simulator.py` | Timeline/budget/efficiency scenario deltas |
+| `JiraAPIClient` | `src/integrations/jira_client.py` | REST API v3, pagination, backoff |
+| `JiraOAuthHandler` | `src/integrations/oauth_handler.py` | 3-legged OAuth 2.0, token refresh |
+| `generate_mitigation_strategy` | `src/mitigation/llm_agent.py` | Qwen 3.5 via NVIDIA, exponential backoff |
 
-**RiskNLPEngine** - NLP-based risk detection from text
-- Entity extraction for project entities (tasks, resources, dates)
-- Sentiment analysis for risk tone
-- Risk phrase detection using pattern matching
-- Confidence scoring for risk assessment
-
-**AnomalyEngine** - Statistical anomaly detection
-- Isolation Forest implementation
-- Outlier detection in risk metrics
-- Temporal anomaly identification
-
-**RiskClassifier** - Machine learning risk classification
-- Multi-class risk categorization
-- Probability-based scoring
-
-### 2. Forecasting (`src/forecasting/`)
-
-**ProjectForecaster** - Time-series risk forecasting
-- Facebook Prophet for trend prediction
-- Handles seasonality and holidays
-- Confidence intervals for predictions
-
-### 3. NLP (`src/nlp/`)
-
-**RiskTextDetector** - Text-based risk analysis
-- Integration point for NLP models
-- Risk score calculation from text
-
-### 4. XAI (`src/xai/`)
-
-**SHAPExplainer** - Model interpretability
-- Feature importance analysis
-- Decision explanations using SHAP values
-
-### 5. Mitigation (`src/mitigation/`)
-
-**MitigationAgent** - Risk mitigation recommendation engine
-- LLM-based strategy generation
-- Actionable recommendations
+---
 
 ## Import Patterns
 
-### Main Package Imports (Recommended)
-
 ```python
-# Import from main package
-from src import RiskNLPEngine, AnomalyEngine, ProjectForecaster
-
-# Or specific module imports
-from src.models import RiskNLPEngine
-from src.forecasting import ProjectForecaster
-from src.xai import SHAPExplainer
-```
-
-### Direct Module Imports
-
-```python
-# For more explicit imports
-from src.models.nlp_risk_engine import RiskNLPEngine
+# Domain-specific (recommended)
+from src.anomaly import AnomalyEngine
+from src.nlp import RiskNLPEngine
 from src.forecasting.forecast import ProjectForecaster
+from src.simulation.what_if_simulator import WhatIfSimulator
+from src.integrations.jira_client import JiraAPIClient
+from src.integrations.oauth_handler import JiraOAuthHandler
+from src.mitigation.llm_agent import generate_mitigation_strategy
+
+# Main package re-exports
+from src import RiskNLPEngine, AnomalyEngine
 ```
 
-## Phase 2 Extension Points
+---
 
-The framework includes placeholder modules for Phase 2 features:
-
-- **Phase 2-B** (`src/anomaly/`) - Advanced anomaly detection
-- **Phase 2-D** (`src/simulation/`) - What-If scenario analysis
-- **Phase 2-E/F** (`src/integrations/`) - Jira and OAuth integration
-
-## Configuration
-
-Global configuration is managed in `src/config.py` and supports:
-- Environment-based configuration
-- Model parameters
-- API endpoints
-- Data paths
-
-## Testing Architecture
-
-Tests are organized into two categories:
-
-### Unit Tests (`tests/unit/`)
-- Isolated component testing
-- Fast execution
-- No external dependencies
-- Run with: `pytest tests/unit/`
-
-### Integration Tests (`tests/integration/`)
-- End-to-end workflow validation
-- Performance benchmarks
-- Real data testing
-- Run with: `pytest tests/integration/`
-
-### Pytest Configuration
-
-Global fixtures and configuration in `tests/conftest.py`:
-- `project_root` - Root directory path
-- `data_dir` - Data directory path
-- `github_issues_dataset` - Sample test data
-
-## Build & Installation
-
-### Development Installation
+## Testing
 
 ```bash
-# Install in development mode with dev dependencies
-pip install -e ".[dev]"
+# Full suite (76/76 passing)
+.venv\Scripts\python.exe -m pytest tests/ -v
 
-# Run tests
-pytest
+# Unit tests only
+.venv\Scripts\python.exe -m pytest tests/unit/ -v
 
-# Run with coverage
-pytest --cov=src --cov-report=html
+# Integration tests only
+.venv\Scripts\python.exe -m pytest tests/integration/ -v
+
+# With coverage
+.venv\Scripts\python.exe -m pytest tests/ --cov=src --cov-report=html
 ```
 
-### Package Configuration
-
-- **setup.py** - Traditional setuptools configuration
-- **pyproject.toml** - PEP 517/518 build configuration
-- **pytest.ini** - Pytest test discovery and markers
+---
 
 ## Design Principles
 
-1. **Modularity** - Each component is self-contained and reusable
-2. **Scalability** - Easy to add Phase 2 features without modifying core
-3. **Testability** - Comprehensive test coverage with unit/integration separation
-4. **Maintainability** - Clear imports, documentation, and configuration
-5. **Extensibility** - Phase 2 placeholders prepared for seamless integration
-
-## Future Enhancements
-
-Phase 2 includes:
-- Advanced anomaly detection algorithms
-- What-If scenario simulation engine
-- Jira ticket integration
-- OAuth-based authentication
-- Real-time risk streaming
-- Advanced visualization dashboard
+1. **Domain-first** — modules named by domain, not by type
+2. **Lazy imports** — `app/views/__init__.py` uses `__getattr__` to prevent cascade failures
+3. **Graceful degradation** — all external API failures return safe fallbacks
+4. **TTL caching** — GenAI recommendations cached for 600s in session state
+5. **Unified design system** — all styling via `app/utils/styles.py` `COLORS` dict

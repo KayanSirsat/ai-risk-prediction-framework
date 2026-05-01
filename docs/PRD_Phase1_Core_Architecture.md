@@ -221,36 +221,39 @@ The Autonomous GenAI Auditor bridges the gap between statistical prediction and 
 |--------|-------------|---------------------|
 | F1-C-01 | System shall detect high-risk predictions and trigger GenAI consultation | Predictions with risk_level="High" automatically queued for LLM |
 | F1-C-02 | System shall construct prompts containing prediction context and SHAP drivers | Prompt includes risk level, top 5 SHAP features, and project metadata |
-| F1-C-03 | System shall invoke Qwen 3.5 via NVIDIA Inference API | API call successfully returns LLM response |
-| F1-C-04 | System shall parse internal reasoning tags using regex | `<think>...</think>` tags extracted and optionally displayed |
+| F1-C-03 | System shall invoke Qwen 3.5 via NVIDIA Inference API (`qwen/qwen3.5-122b-a10b`) | API call successfully returns LLM response |
+| F1-C-04 | System shall parse structured XML reasoning tags using regex | `<reasoning>...</reasoning>` and `<strategy>...</strategy>` tags extracted and optionally displayed |
 | F1-C-05 | System shall format response as 3-step actionable mitigation plan | Output structured as Step 1, Step 2, Step 3 with clear actions |
 
 #### 3.3.3 Technical Specification
 
 **Prompt Engineering Template:**
 ```
-You are an expert project risk auditor. A project has been classified as {risk_level} risk.
+You are an Agile Project Management Expert.
+A Jira ticket has been flagged as {risk_level} Risk.
 
-The top contributing factors (from SHAP analysis) are:
-1. {feature_1}: {shap_value_1}% influence
-2. {feature_2}: {shap_value_2}% influence
-...
+The top SHAP drivers are: {top_shap_features}
+The ticket details are: {ticket_details}
 
-Based on this analysis, provide exactly 3 actionable mitigation steps.
-Format your response as:
-Step 1: [Action]
-Step 2: [Action]
-Step 3: [Action]
+You MUST format your exact response using these XML tags:
+<reasoning>
+[Your step-by-step analysis of the SHAP metrics]
+</reasoning>
+<strategy>
+[Your concrete 3-step mitigation plan]
+</strategy>
 ```
 
 **API Configuration:**
-- **Endpoint:** NVIDIA Inference API (Qwen 3.5 model)
-- **Authentication:** API Key via environment variable
-- **Response Parsing:** Regex extraction for `<think>` tags and step enumeration
+- **Endpoint:** NVIDIA Inference API
+- **Model:** `qwen/qwen3.5-122b-a10b` (Qwen 3.5 via NVIDIA)
+- **Authentication:** API Key via environment variable `NVIDIA_API_KEY`
+- **Response Parsing:** Regex extraction for `<reasoning>` and `<strategy>` tags
 
 **Reasoning Transparency:**
-- Internal reasoning (`<think>` blocks) preserved for audit purposes
-- Option to display reasoning chain in "Advanced" UI mode
+- Analysis reasoning (`<reasoning>` blocks) preserved for IEEE audit purposes
+- Mitigation strategy (`<strategy>` blocks) displayed to end users
+- Option to display reasoning chain in "IEEE Audit Trace" expander in UI
 
 #### 3.3.4 User Stories
 
