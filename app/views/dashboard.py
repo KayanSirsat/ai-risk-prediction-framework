@@ -9,6 +9,7 @@ import streamlit as st
 from sklearn.metrics import roc_auc_score
 
 from app.utils.styles import COLORS, render_page_header, render_section_header
+from app.utils.routes import AUDITOR_PAGE, switch_page_safe
 from src.anomaly.anomaly_detector import AnomalyEngine
 from src.forecasting.forecast import ProjectForecaster
 
@@ -370,22 +371,212 @@ def _render_alerts_table(alerts_df: pd.DataFrame) -> None:
     table_df.columns = ["Timestamp", "Ticket", "Alert Type", "Severity", "Status"]
     st.dataframe(table_df, hide_index=True, use_container_width=True)
 
+    options = list(range(len(table_df)))
+    selected_idx = st.selectbox(
+        "Open selected alert in Ticket Auditor",
+        options=options,
+        format_func=lambda i: f"{table_df.iloc[i]['Ticket']} ({table_df.iloc[i]['Severity']})",
+    )
+    if st.button("Open in Auditor", use_container_width=True):
+        st.session_state["auditor_ticket_index"] = int(selected_idx)
+        switched = switch_page_safe(AUDITOR_PAGE)
+        if not switched:
+            st.warning("Ticket Auditor page is not available in this environment.")
+
 
 def render_forecasting_page(show_topbar: bool = True) -> None:
-    """Backward-compatible forecasting page entrypoint."""
-    if show_topbar:
-        st.caption("Forecasting page header is rendered by the calling page.")
-    st.info(
-        "Forecasting view is transitioning to the new Phase 2 layout. "
-        "Use Dashboard for full live forecasting metrics right now."
+    """Fully functional Forecasting Lab page (Phase 2-A)."""
+    render_page_header(
+        title="Forecasting Lab",
+        subtitle="Prophet-based time-series risk forecasting with sprint seasonality",
     )
+
+    contamination = float(st.session_state.get("model_anomaly_sensitivity", 0.05))
+    forecast_horizon = int(st.session_state.get("model_forecast_horizon", 14))
+
+    controls_col, _ = st.columns([1.5, 4.5])
+    with controls_col:
+        if st.button("Regenerate Forecast", use_container_width=True):
+            st.cache_resource.clear()
+            LOGGER.info("Forecast cache cleared by user")
+            st.rerun()
+
+    st.caption(
+        f"Forecast horizon: **{forecast_horizon} days** | Anomaly sensitivity: {contamination:.2f} | "
+        "Model: Facebook Prophet with 14-day sprint seasonality"
+    )
+
+    try:
+        dashboard_data = _load_dashboard_models(contamination, forecast_horizon)
+    except Exception as exc:
+        LOGGER.exception("Forecast model loading failed: %s", exc)
+        st.error("Unable to load forecasting models. Please try again.")
+        return
+
+    forecast_df = dashboard_data["forecast"].get("forecast")
+    forecast_metrics = dashboard_data["forecast"].get("metrics") or {}
+    forecast_meta = dashboard_data["forecast"].get("metadata") or {}
+
+    # --- KPI row ---
+    mape = forecast_metrics.get("mape")
+    rmse = forecast_metrics.get("rmse")
+    r2 = forecast_metrics.get("r2")
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("MAPE", f"{mape:.2f}%" if mape is not None else "N/A", help="Mean Absolute Percentage Error")
+    m2.metric("RMSE", f"{rmse:.2f}" if rmse is not None else "N/A", help="Root Mean Squared Error")
+    m3.metric("R²", f"{r2:.3f}" if r2 is not None else "N/A", help="Coefficient of determination")
+    m4.metric("Forecast Days", str(forecast_horizon))
+
+    st.markdown("<div style='height: 1rem'></div>", unsafe_allow_html=True)
+    render_section_header("Forecast: Cost Risk Trajectory")
+
+    # Static figure if available; live data fallback
+    if FORECAST_FIG_PATH.exists():
+        st.image(str(FORECAST_FIG_PATH), use_container_width=True)
+        st.caption(
+            "Pre-generated Prophet forecast figure. Click 'Regenerate Forecast' to refresh."
+        )
+    elif forecast_df is not None and not forecast_df.empty:
+        st.line_chart(
+            forecast_df.set_index("ds")[["yhat", "yhat_lower", "yhat_upper"]].tail(
+                forecast_horizon + 60
+            )
+        )
+    else:
+        st.warning("Forecast figure not available. Run the forecast figure generation script.")
+
+    render_section_header("Prophet Model Configuration")
+    seasonalities = forecast_meta.get("seasonalities", [])
+    training_periods = forecast_meta.get("training_periods", "N/A")
+    col_a, col_b = st.columns(2)
+    col_a.markdown(
+        f"""
+        **Seasonalities Modelled:** {', '.join(seasonalities) if seasonalities else 'weekly'}  
+        **Training Periods:** {training_periods} data points  
+        **Changepoint Prior:** 0.05 (default)  
+        **Sprint Cycle:** 14-day Fourier seasonality (order 3)
+        """
+    )
+    col_b.markdown(
+        """
+        **Validation Method:** 80/20 train-test split  
+        **Metrics Computed:** MAPE, RMSE, R²  
+        **Confidence Intervals:** 80% and 95%  
+        **Growth Type:** Linear
+        """
+    )
+
+    if forecast_df is not None and not forecast_df.empty:
+        st.markdown("<div style='height: 0.5rem'></div>", unsafe_allow_html=True)
+        forecast_csv = forecast_df.to_csv(index=False).encode("utf-8")
+        st.download_button(
+            label="Download Full Forecast CSV",
+            data=forecast_csv,
+            file_name="prophet_forecast_output.csv",
+            mime="text/csv",
+            use_container_width=True,
+        )
 
 
 def render_anomaly_page(show_topbar: bool = True) -> None:
-    """Backward-compatible anomaly page entrypoint."""
-    if show_topbar:
-        st.caption("Anomaly page header is rendered by the calling page.")
-    st.info(
-        "Anomaly triage board is transitioning to the new Phase 2 layout. "
-        "Use Dashboard for current anomaly detection outputs right now."
+    """Fully functional Anomaly Triage Board page (Phase 2-B)."""
+    render_page_header(
+        title="Anomaly Triage Board",
+        subtitle="Isolation Forest anomaly detection with severity ranking and SHAP-proxy attribution",
+    )
+
+    contamination = float(st.session_state.get("model_anomaly_sensitivity", 0.05))
+    forecast_horizon = int(st.session_state.get("model_forecast_horizon", 14))
+
+    controls_col, _ = st.columns([1.5, 4.5])
+    with controls_col:
+        if st.button("Refresh Anomalies", use_container_width=True):
+            st.cache_resource.clear()
+            LOGGER.info("Anomaly cache cleared by user")
+            st.rerun()
+
+    st.caption(f"Isolation Forest | Contamination: {contamination:.2f} | n_estimators: 100")
+
+    try:
+        dashboard_data = _load_dashboard_models(contamination, forecast_horizon)
+    except Exception as exc:
+        LOGGER.exception("Anomaly model loading failed: %s", exc)
+        st.error("Unable to load anomaly detection models. Please try again.")
+        return
+
+    anomaly_results = dashboard_data["anomaly"]
+    severity_counts = dashboard_data["severity_counts"]
+    roc_auc = dashboard_data["roc_auc"]
+    alerts_table = dashboard_data["alerts"]
+
+    # --- KPI row ---
+    anomaly_rate = anomaly_results["is_anomaly"].mean() * 100.0
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Anomaly Rate", f"{anomaly_rate:.2f}%")
+    c2.metric("ROC-AUC Score", f"{roc_auc:.3f}")
+    c3.metric("High Severity", int(severity_counts["High"]))
+    c4.metric("Total Anomalies", int(anomaly_results["is_anomaly"].sum()))
+
+    st.markdown("<div style='height: 1rem'></div>", unsafe_allow_html=True)
+
+    col_left, col_right = st.columns([3, 2])
+    with col_left:
+        render_section_header("Severity Distribution")
+        if SEVERITY_FIG_PATH.exists():
+            st.image(str(SEVERITY_FIG_PATH), use_container_width=True)
+        else:
+            sev_df = severity_counts.reset_index()
+            sev_df.columns = ["Severity", "Count"]
+            st.bar_chart(sev_df.set_index("Severity"))
+
+        render_section_header("Recent Anomaly Alerts")
+        _render_alerts_table(alerts_table)
+
+    with col_right:
+        render_section_header("Top Risk Drivers (SHAP Proxy)")
+        shap_proxy_df = _build_shap_proxy_table(anomaly_results)
+        if shap_proxy_df.empty:
+            st.info("No feature contribution data available.")
+        else:
+            st.dataframe(shap_proxy_df, hide_index=True, use_container_width=True)
+
+        render_section_header("Severity Breakdown")
+        for level in ["High", "Medium", "Low", "Normal"]:
+            count = int(severity_counts[level])
+            st.metric(level, count)
+
+        st.caption("ROC-AUC compares domain-derived labels vs Isolation Forest anomaly scores.")
+
+    # Full anomaly data export
+    st.markdown("<div style='height: 1rem'></div>", unsafe_allow_html=True)
+    render_section_header("Raw Anomaly Data")
+    severity_filter = st.selectbox(
+        "Filter by Severity",
+        options=["All", "High", "Medium", "Low", "Normal"],
+        index=0,
+        key="anomaly_severity_filter",
+    )
+    display_df = anomaly_results.copy()
+    if severity_filter != "All":
+        display_df = display_df[display_df["severity"].astype(str) == severity_filter]
+
+    anomaly_only = st.toggle("Show anomalies only", value=True, key="anomaly_only_toggle")
+    if anomaly_only:
+        display_df = display_df[display_df["is_anomaly"]]
+
+    cols_to_show = [c for c in [
+        "is_anomaly", "anomaly_score", "severity",
+        "budget_overrun_pct", "days_overrun_pct",
+        "efficiency_score", "cost_efficiency",
+        "feature_contributions",
+    ] if c in display_df.columns]
+    st.dataframe(display_df[cols_to_show].head(200), use_container_width=True, hide_index=False)
+
+    csv_bytes = display_df.to_csv(index=False).encode("utf-8")
+    st.download_button(
+        label="Download Anomaly Report (CSV)",
+        data=csv_bytes,
+        file_name="anomaly_triage_report.csv",
+        mime="text/csv",
+        use_container_width=True,
     )
