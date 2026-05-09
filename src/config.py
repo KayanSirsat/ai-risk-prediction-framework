@@ -36,3 +36,33 @@ def get_jira_oauth_settings() -> dict[str, str]:
         "client_secret": get_env("JIRA_OAUTH_CLIENT_SECRET"),
         "redirect_uri": get_env("JIRA_OAUTH_REDIRECT_URI", "http://localhost:8501"),
     }
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+class Paths:
+    """Canonical project path constants. Single source of truth for all file paths."""
+
+    DATA_DIR: Path = PROJECT_ROOT / "data"
+    MODEL_DIR: Path = PROJECT_ROOT / "models"
+    LOGS_DIR: Path = PROJECT_ROOT / "logs"
+    REPORTS_DIR: Path = PROJECT_ROOT / "reports"
+    APP_COMPONENTS_DIR: Path = PROJECT_ROOT / "app" / "components"
+
+    ML_READY_DATA: Path = DATA_DIR / "ml_ready_data.csv"
+    RAW_JIRA_DATA: Path = DATA_DIR / "raw_jira_data.csv"
+    CURATED_ANOMALIES: Path = DATA_DIR / "curated_anomalies.csv"
+    AUTH_DB: Path = DATA_DIR / "auth.db"
+
+    XGB_MODEL: Path = MODEL_DIR / "xgb_model.pkl"
+    RF_MODEL: Path = MODEL_DIR / "rf_model.pkl"
+    FEATURE_COLUMNS: Path = MODEL_DIR / "feature_columns.pkl"
+    ISOLATION_FOREST: Path = MODEL_DIR / "isolation_forest.pkl"
+
+    CONFUSION_MATRIX_IMG: Path = APP_COMPONENTS_DIR / "confusion_matrix.png"
+    ROC_CURVE_IMG: Path = APP_COMPONENTS_DIR / "roc_curve.png"
+    SHAP_SUMMARY_IMG: Path = APP_COMPONENTS_DIR / "shap_summary.png"
+
+    FORECAST_FIGURE: Path = REPORTS_DIR / "fig_phase2_a_prophet_forecast.png"
+    SEVERITY_HISTOGRAM: Path = APP_COMPONENTS_DIR / "severity_breakdown.png"
