@@ -5,7 +5,6 @@ Feature engineering, data cleaning, and pipeline orchestration.
 
 from .data_pipeline import (
     load_and_sample_data,
-    inject_metadata,
     generate_metrics_with_signals,
     calculate_risk_level,
     clean_for_ml,
@@ -14,7 +13,6 @@ from .data_pipeline import (
 
 __all__ = [
     "load_and_sample_data",
-    "inject_metadata",
     "generate_metrics_with_signals",
     "calculate_risk_level",
     "clean_for_ml",

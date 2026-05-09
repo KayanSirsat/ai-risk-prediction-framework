@@ -1,7 +1,10 @@
-import pandas as pd
-import numpy as np
+import logging
 import os
-import random
+from importlib import import_module
+from typing import Any, Dict, List
+
+import numpy as np
+import pandas as pd
 
 # Constants
 RAW_DATA_PATH = "data/raw_jira_data.csv"
@@ -9,65 +12,137 @@ PROCESSED_DATA_PATH = "data/ml_ready_data.csv"
 SAMPLE_SIZE = 10000
 DAILY_BURN_RATE = 500
 
+LOGGER = logging.getLogger("preprocessing.pipeline")
+if not LOGGER.handlers:
+    handler = logging.StreamHandler()
+    handler.setFormatter(
+        logging.Formatter("%(asctime)s | %(levelname)s | %(message)s")
+    )
+    LOGGER.addHandler(handler)
+    LOGGER.setLevel(logging.INFO)
+    LOGGER.propagate = False
 
-def load_and_sample_data(path, sample_size):
-    print(f"[1/6] Loading data from {path}...")
-    if not os.path.exists(path):
-        # Create a dummy raw file if it doesn't exist to avoid crash
-        print("[WARNING] Raw file not found. Creating dummy raw dataset for simulation.")
-        df = pd.DataFrame(
-            {"Issue_ID": range(sample_size), "Summary": ["Draft issue"] * sample_size}
+
+def _normalize_jira_schema(df: pd.DataFrame) -> pd.DataFrame:
+    rename_map = {
+        "Issue key": "Issue_key",
+        "Issue id": "Issue_ID",
+        "Issue Type": "Issue_Type",
+        "Story Points": "Story_Points",
+    }
+    for source, target in rename_map.items():
+        if source in df.columns and target not in df.columns:
+            df = df.rename(columns={source: target})
+
+    if "Summary" not in df.columns:
+        LOGGER.warning("Summary column missing; creating empty Summary field.")
+        df["Summary"] = ""
+    if "Description" not in df.columns:
+        LOGGER.warning("Description column missing; creating empty Description field.")
+        df["Description"] = ""
+
+    return df
+
+
+def _fetch_jira_issues(sample_size: int) -> List[Dict[str, Any]]:
+    module = import_module("src.integrations.jira_client")
+    jira_cls = getattr(module, "JiraAPIClient", None)
+    if jira_cls is None:
+        raise ImportError("Jira integration client is not available")
+
+    base_url = os.getenv("JIRA_URL", "").strip()
+    project_key = os.getenv("JIRA_PROJECT_KEY", "").strip()
+    user_email = os.getenv("JIRA_USER_EMAIL", "").strip()
+    api_token = os.getenv("JIRA_API_TOKEN", "").strip()
+
+    token_payload = {}
+    if hasattr(jira_cls, "load_cached_tokens"):
+        token_payload = jira_cls.load_cached_tokens()
+
+    access_token = os.getenv("JIRA_OAUTH_ACCESS_TOKEN", "").strip() or token_payload.get("access_token", "")
+    cloud_id = os.getenv("JIRA_OAUTH_CLOUD_ID", "").strip() or token_payload.get("cloud_id", "")
+    refresh_token = token_payload.get("refresh_token", "")
+    token_expires_at = float(token_payload.get("token_expires_at", 0.0))
+
+    if not access_token and not (user_email and api_token):
+        raise FileNotFoundError(
+            "raw_jira_data.csv not found and Jira API sync failed. "
+            "Please log into the Streamlit app to authenticate Jira first."
         )
-        df.to_csv(path, index=False)
 
-    df = pd.read_csv(path)
+    client = jira_cls(
+        base_url=base_url,
+        project_key=project_key,
+        access_token=access_token,
+        cloud_id=cloud_id,
+        refresh_token=refresh_token,
+        token_expires_at=token_expires_at,
+        user_email=user_email,
+        api_token=api_token,
+    )
+
+    if hasattr(client, "sync_issues"):
+        return client.sync_issues(max_results=sample_size)
+
+    jql_query = None
+    if hasattr(client, "default_jql"):
+        jql_query = client.default_jql()
+    issues = client.fetch_issues(jql_query or f"project = {project_key}")
+    if hasattr(client, "issues_to_metrics"):
+        return client.issues_to_metrics(issues)
+    return issues
+
+
+def load_and_sample_data(path: str, sample_size: int) -> pd.DataFrame:
+    LOGGER.info("[1/6] Loading data from %s...", path)
+    if not os.path.exists(path):
+        LOGGER.warning("Raw Jira CSV not found. Attempting Jira API sync...")
+        try:
+            rows = _fetch_jira_issues(sample_size)
+        except Exception as exc:
+            LOGGER.error("Jira API sync failed: %s", exc)
+            raise FileNotFoundError(
+                "raw_jira_data.csv not found and Jira API sync failed. "
+                "Please log into the Streamlit app to authenticate Jira first."
+            ) from exc
+
+        if not rows:
+            raise FileNotFoundError(
+                "raw_jira_data.csv not found and Jira API sync failed. "
+                "Please log into the Streamlit app to authenticate Jira first."
+            )
+
+        df = pd.DataFrame(rows)
+        df.to_csv(path, index=False)
+        LOGGER.info("Saved Jira issues to %s", path)
+    else:
+        df = pd.read_csv(path)
+
+    df = _normalize_jira_schema(df)
     if len(df) > sample_size:
         df = df.sample(n=sample_size, random_state=42)
     return df
 
 
-def inject_metadata(df):
-    print("[2/6] Injecting Project and Developer Metadata...")
-
-    # Categorical Options
-    priorities = ["High", "Medium", "Low"]
-    issue_types = ["Bug", "Task", "Epic"]
-    seniorities = ["Junior", "Mid", "Senior"]
-    story_points_options = [1, 2, 3, 5, 8, 13]
-
-    # Synthetic Text components
-    actions = ["Fix", "Implement", "Optimize", "Refactor", "Update"]
-    targets = [
-        "Login API",
-        "Database Schema",
-        "UI Header",
-        "Payment Gateway",
-        "Auth Module",
-    ]
-
-    df["Priority"] = np.random.choice(priorities, size=len(df))
-    df["Issue_Type"] = np.random.choice(issue_types, size=len(df))
-    df["Assignee_Seniority"] = np.random.choice(seniorities, size=len(df))
-    df["Story_Points"] = np.random.choice(story_points_options, size=len(df))
-
-    # Generate synthetic text
-    df["Summary"] = [
-        f"{random.choice(actions)} {random.choice(targets)}" for _ in range(len(df))
-    ]
-    df["Description"] = [
-        f"Detail: {random.choice(actions)} the {random.choice(targets)} for improved performance."
-        for _ in range(len(df))
-    ]
-
-    return df
-
-
 def generate_metrics_with_signals(df):
-    print("[3/6] Generating synthetic metrics with hidden signals...")
+    LOGGER.info("[2/6] Generating synthetic metrics with hidden signals...")
+
+    defaults = {
+        "Priority": "Medium",
+        "Issue_Type": "Task",
+        "Assignee_Seniority": "Mid",
+        "Story_Points": 3.0,
+    }
+    for column, fallback in defaults.items():
+        if column not in df.columns:
+            LOGGER.warning("Missing %s column; defaulting to %s", column, fallback)
+            df[column] = fallback
 
     # Base Estimation
-    df["Estimated_Days"] = np.random.randint(2, 15, size=len(df))
-    df["Budget_Allocated"] = df["Estimated_Days"] * DAILY_BURN_RATE
+    if "Estimated_Days" not in df.columns:
+        df["Estimated_Days"] = np.random.randint(2, 15, size=len(df))
+    if "Budget_Allocated" not in df.columns:
+        df["Budget_Allocated"] = df["Estimated_Days"] * DAILY_BURN_RATE
 
     # HIDDEN SIGNALS: Determine Actual Days based on metadata
     def calculate_actuals(row):
@@ -91,14 +166,16 @@ def generate_metrics_with_signals(df):
         actual = (base_days * multiplier) * noise
         return max(1, round(actual))
 
-    df["Actual_Days"] = df.apply(calculate_actuals, axis=1)
-    df["Cost_Consumed"] = df["Actual_Days"] * DAILY_BURN_RATE
+    if "Actual_Days" not in df.columns:
+        df["Actual_Days"] = df.apply(calculate_actuals, axis=1)
+    if "Cost_Consumed" not in df.columns:
+        df["Cost_Consumed"] = df["Actual_Days"] * DAILY_BURN_RATE
 
     return df
 
 
 def calculate_risk_level(df):
-    print("[4/6] Calculating target variable: Risk_Level...")
+    LOGGER.info("[3/6] Calculating target variable: Risk_Level...")
 
     def determine_risk(row):
         cost_overrun_pct = (row["Cost_Consumed"] / row["Budget_Allocated"]) - 1
@@ -112,14 +189,12 @@ def calculate_risk_level(df):
             return "Low"
 
     df["Risk_Level"] = df.apply(determine_risk, axis=1)
-    print("\nRisk Level Distribution:")
-    print(df["Risk_Level"].value_counts())
-    print("-" * 30)
+    LOGGER.info("Risk Level Distribution:\n%s", df["Risk_Level"].value_counts())
     return df
 
 
 def clean_for_ml(df):
-    print("[5/6] Cleaning dataset for ML export...")
+    LOGGER.info("[4/6] Cleaning dataset for ML export...")
     # Preserve ALL signals and metadata
     cols_to_keep = [
         "Priority",
@@ -140,18 +215,17 @@ def clean_for_ml(df):
 
 
 def save_processed_data(df, path):
-    print(f"[6/6] Saving processed data to {path}...")
+    LOGGER.info("[5/6] Saving processed data to %s...", path)
     df.to_csv(path, index=False)
-    print("Pipeline executed successfully.")
+    LOGGER.info("Pipeline executed successfully.")
 
 
 if __name__ == "__main__":
     try:
         data = load_and_sample_data(RAW_DATA_PATH, SAMPLE_SIZE)
-        data = inject_metadata(data)
         data = generate_metrics_with_signals(data)
         data = calculate_risk_level(data)
         data = clean_for_ml(data)
         save_processed_data(data, PROCESSED_DATA_PATH)
     except Exception as e:
-        print(f"Pipeline failed: {e}")
+        LOGGER.error("Pipeline failed: %s", e)
