@@ -4,38 +4,15 @@ import joblib
 import os
 import re
 
-FEATURE_COLUMNS_PATH = "models/feature_columns.pkl"
+from src.config import Paths
+
+FEATURE_COLUMNS_PATH = str(Paths.FEATURE_COLUMNS)
 
 
 def _preprocess_row(ticket_row, dataset):
-    TARGET_COL = "Risk_Level"
+    from src.preprocessing.feature_alignment import preprocess_row
 
-    X = pd.DataFrame([ticket_row.values], columns=ticket_row.index)
-
-    original_dtypes = dataset.drop(columns=[TARGET_COL], errors="ignore").dtypes
-    for col in X.columns:
-        if col in original_dtypes.index:
-            X[col] = X[col].astype(original_dtypes[col])
-
-    X = X.drop(columns=["Actual_Days", "Cost_Consumed"], errors="ignore")
-    X = X.drop(
-        columns=["Summary", "Description", "Issue_ID", "Issue_key"], errors="ignore"
-    )
-
-    cat_cols = X.select_dtypes(include=["object", "category"]).columns
-    if len(cat_cols) > 0:
-        X = pd.get_dummies(X, columns=cat_cols)
-
-    X.columns = [re.sub(r"[\[\]<]", "_", str(c)) for c in X.columns]
-
-    # Align columns to the training feature set so all expected one-hot columns exist.
-    # Columns present in train but missing here (e.g. Priority_High when ticket is Low)
-    # are filled with 0; extra columns are dropped.
-    if os.path.exists(FEATURE_COLUMNS_PATH):
-        training_columns = joblib.load(FEATURE_COLUMNS_PATH)
-        X = X.reindex(columns=training_columns, fill_value=0)
-
-    return X
+    return preprocess_row(ticket_row, dataset)
 
 
 def render_ticket_context(selected_row, pipeline, dataset):

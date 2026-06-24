@@ -5,7 +5,7 @@ import streamlit as st
 st.set_page_config(layout="wide", initial_sidebar_state="expanded")
 
 from app.utils.sidebar import render_sidebar
-from app.utils.styles import inject_global_css, render_topbar
+from app.utils.styles import inject_global_css
 from app.views.auditor import render_auditor
 
 if not st.session_state.get("authenticated", False):
@@ -13,5 +13,4 @@ if not st.session_state.get("authenticated", False):
 
 inject_global_css()
 render_sidebar()
-render_topbar("Ticket Auditor")
 render_auditor()

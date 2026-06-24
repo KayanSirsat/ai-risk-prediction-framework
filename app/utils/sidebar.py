@@ -1,4 +1,4 @@
-"""Custom sidebar navigation for Streamlit MPA."""
+"""Minimalist sidebar navigation for Streamlit MPA."""
 
 from __future__ import annotations
 
@@ -27,15 +27,14 @@ def _exists(page_path: str) -> bool:
     return (PROJECT_ROOT / "app" / page_path).exists()
 
 
-def _link(page_path: str, label: str, icon: str) -> None:
+def _link(page_path: str, label: str) -> None:
     if _exists(page_path):
-        st.page_link(page_path, label=label, icon=icon)
+        st.page_link(page_path, label=label)
     else:
         st.caption(f"{label} unavailable")
 
 
 def render_sidebar() -> None:
-    """Render custom sidebar with consistent MPA mapping."""
     user = st.session_state.get(
         "user",
         {
@@ -53,48 +52,37 @@ def render_sidebar() -> None:
     role = user.get("role", "Admin")
     initial = display_name[0].upper()
 
+    logo_path = str(PROJECT_ROOT / "app" / "assets" / "logo.png")
+    icon_path = str(PROJECT_ROOT / "app" / "assets" / "icon.png")
+    st.logo(logo_path, icon_image=icon_path)
+
     with st.sidebar:
-        st.markdown(
-            """
-            <div style='padding:16px 12px 12px 12px; border-bottom:1px solid #1C3A54; margin-bottom: 16px;'>
-            <span style='color:#FFFFFF; font-weight: 700; font-size:16px;'>Risk Framework</span>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-        st.markdown(
-            "<div class='section-title'>WORKSPACE</div>", unsafe_allow_html=True
-        )
-        _link(PAGE_PATHS["dashboard"], "Dashboard", "📊")
 
-        st.markdown(
-            "<div class='section-title'>MONITORING</div>", unsafe_allow_html=True
-        )
-        _link(PAGE_PATHS["forecasting"], "Forecasting Lab", "📈")
-        _link(PAGE_PATHS["anomaly"], "Anomaly Triage", "🚨")
-        _link(PAGE_PATHS["auditor"], "Ticket Auditor", "🧠")
-        _link(PAGE_PATHS["what_if"], "What-If Simulation", "🧪")
+        st.markdown("<div class='section-title'>Workspace</div>", unsafe_allow_html=True)
+        _link(PAGE_PATHS["dashboard"], "Dashboard")
 
-        st.markdown(
-            "<div class='section-title'>INTEGRATIONS</div>", unsafe_allow_html=True
-        )
-        _link(PAGE_PATHS["jira_sync"], "Jira Sync", "🔄")
+        st.markdown("<div class='section-title'>Monitoring</div>", unsafe_allow_html=True)
+        _link(PAGE_PATHS["forecasting"], "Forecasting Lab")
+        _link(PAGE_PATHS["anomaly"], "Anomaly Triage")
+        _link(PAGE_PATHS["auditor"], "Ticket Auditor")
+        _link(PAGE_PATHS["what_if"], "What-If Simulation")
 
-        st.markdown("<div class='sidebar-spacer'></div>", unsafe_allow_html=True)
+        st.markdown("<div class='section-title'>Integrations</div>", unsafe_allow_html=True)
+        _link(PAGE_PATHS["jira_sync"], "Jira Sync")
 
-        st.markdown("<div class='section-title'>SYSTEM</div>", unsafe_allow_html=True)
-        _link(PAGE_PATHS["settings"], "Settings", "⚙️")
+        st.markdown("<div class='section-title'>System</div>", unsafe_allow_html=True)
+        _link(PAGE_PATHS["settings"], "Settings")
 
         st.markdown(
             f"""
-            <div class="user-zone">
-            <div class="user-card">
-            <div class="user-avatar">{initial}</div>
-            <div>
-            <div class="user-meta-name">{display_name}</div>
-            <div class="user-meta-role">{role}</div>
-            </div>
-            </div>
+            <div class="sidebar-footer">
+                <div style="display:flex; align-items:center; gap:0.5rem;">
+                    <div style="width:28px; height:28px; border-radius:50%; background:#1f1f1f; display:flex; align-items:center; justify-content:center; color:#ffffff; font-size:0.8rem;">{initial}</div>
+                    <div>
+                        <div style="color:#ffffff; font-size:0.8rem; font-weight:600;">{display_name}</div>
+                        <div style="color:#8a8a8a; font-size:0.7rem;">{role}</div>
+                    </div>
+                </div>
             </div>
             """,
             unsafe_allow_html=True,

@@ -1,15 +1,20 @@
-"""Dashboard View for live forecasting and anomaly analytics."""
+"""Dashboard views with minimalist layout."""
+
+from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import cast
 
 import numpy as np
 import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
 from sklearn.metrics import roc_auc_score
 
-from app.utils.styles import COLORS, render_page_header, render_section_header
 from app.utils.routes import AUDITOR_PAGE, switch_page_safe
+from app.utils.styles import render_page_header, render_section_header, render_top_bar
 from src.anomaly.anomaly_detector import AnomalyEngine
 from src.forecasting.forecast import ProjectForecaster
 
@@ -39,9 +44,7 @@ def _setup_logger() -> logging.Logger:
     log_dir = PROJECT_ROOT / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     file_handler = logging.FileHandler(log_dir / "dashboard_audit.log")
-    formatter = logging.Formatter(
-        "%(asctime)s | %(name)s | %(levelname)s | %(message)s"
-    )
+    formatter = logging.Formatter("%(asctime)s | %(name)s | %(levelname)s | %(message)s")
     file_handler.setFormatter(formatter)
 
     logger.setLevel(logging.INFO)
@@ -56,9 +59,7 @@ LOGGER = _setup_logger()
 def _prepare_anomaly_features(df: pd.DataFrame) -> pd.DataFrame:
     frame = df.copy()
     frame["budget_overrun_pct"] = (
-        (frame["Cost_Consumed"] - frame["Budget_Allocated"])
-        / frame["Budget_Allocated"]
-        * 100
+        (frame["Cost_Consumed"] - frame["Budget_Allocated"]) / frame["Budget_Allocated"] * 100
     )
     frame["days_overrun_pct"] = (
         (frame["Actual_Days"] - frame["Estimated_Days"]) / frame["Estimated_Days"] * 100
@@ -88,33 +89,27 @@ def _infer_alert_name(contribution: str) -> str:
 
 def _build_alerts_table(anomaly_results: pd.DataFrame) -> pd.DataFrame:
     if anomaly_results.empty:
-        return pd.DataFrame(
-            columns=["timestamp", "ticket", "alert", "severity", "status"]
-        )
+        return pd.DataFrame(columns=["timestamp", "ticket", "alert", "severity", "status"])
 
     severity_rank = {"High": 3, "Medium": 2, "Low": 1, "Normal": 0}
-    table = anomaly_results.copy()
-    table = table[table["is_anomaly"]]
+    df_anom = pd.DataFrame(anomaly_results.loc[anomaly_results["is_anomaly"]])
 
-    if table.empty:
-        return pd.DataFrame(
-            columns=["timestamp", "ticket", "alert", "severity", "status"]
-        )
+    if df_anom.empty:
+        return pd.DataFrame(columns=["timestamp", "ticket", "alert", "severity", "status"])
 
-    table["anomaly_intensity"] = -table["anomaly_score"]
-    table["severity_rank"] = table["severity"].astype(str).map(severity_rank).fillna(0)
-    table = table.sort_values(
-        ["severity_rank", "anomaly_intensity"], ascending=[False, False]
-    ).head(5)
+    df_anom["anomaly_intensity"] = -df_anom["anomaly_score"]
+    df_anom["severity_rank"] = df_anom["severity"].astype(str).map(severity_rank).fillna(0)
+    df_top = df_anom.sort_values(by=["severity_rank", "anomaly_intensity"], ascending=[False, False]).head(5)
 
     now_ts = pd.Timestamp.utcnow().floor("s")
     alerts = []
-    for idx, row in table.iterrows():
-        synthetic_ts = now_ts - pd.to_timedelta(int(idx), unit="m")
+    for idx, row in df_top.iterrows():
+        idx_int = cast(int, idx)
+        synthetic_ts = now_ts - pd.to_timedelta(idx_int, unit="m")
         alerts.append(
             {
                 "timestamp": synthetic_ts.strftime("%Y-%m-%d %H:%M:%S"),
-                "ticket": f"{str(row.get('Risk_Level', 'UNKNOWN')).upper()}-{int(idx):05d}",
+                "ticket": f"{str(row.get('Risk_Level', 'UNKNOWN')).upper()}-{idx_int:05d}",
                 "alert": _infer_alert_name(row.get("feature_contributions", "None")),
                 "severity": str(row["severity"]),
                 "status": "Open",
@@ -125,7 +120,6 @@ def _build_alerts_table(anomaly_results: pd.DataFrame) -> pd.DataFrame:
 
 
 def _build_shap_proxy_table(anomaly_results: pd.DataFrame) -> pd.DataFrame:
-    """Build a proxy SHAP driver table from anomaly feature contributions."""
     if anomaly_results.empty or "feature_contributions" not in anomaly_results.columns:
         return pd.DataFrame(columns=["Feature", "Influence"])
 
@@ -158,9 +152,7 @@ def _build_shap_proxy_table(anomaly_results: pd.DataFrame) -> pd.DataFrame:
                 magnitude = float(parts[1].strip())
             except ValueError:
                 continue
-            contribution_totals[feature] = contribution_totals.get(feature, 0.0) + abs(
-                magnitude
-            )
+            contribution_totals[feature] = contribution_totals.get(feature, 0.0) + abs(magnitude)
 
     if not contribution_totals:
         return pd.DataFrame(columns=["Feature", "Influence"])
@@ -177,6 +169,220 @@ def _build_shap_proxy_table(anomaly_results: pd.DataFrame) -> pd.DataFrame:
             }
         )
     return pd.DataFrame(rows)
+
+
+def _render_interactive_forecast_chart(forecast_df: pd.DataFrame | None, forecast_horizon: int) -> None:
+    if forecast_df is None or forecast_df.empty:
+        st.warning("Forecast output is not available for the current settings.")
+        return
+
+    chart_df = forecast_df.copy()
+    chart_df["ds"] = pd.to_datetime(chart_df["ds"], errors="coerce")
+    chart_df = chart_df.dropna(subset=["ds"]).sort_values("ds")
+
+    if chart_df.empty:
+        st.warning("Forecast output is not available for the current settings.")
+        return
+
+    future_points = min(forecast_horizon, len(chart_df))
+    history_df = chart_df.iloc[:-future_points].tail(max(60, forecast_horizon * 4)).copy()
+    future_df = chart_df.tail(future_points).copy()
+
+    fig = go.Figure()
+
+    if not history_df.empty:
+        fig.add_trace(
+            go.Scatter(
+                x=history_df["ds"],
+                y=history_df["yhat"],
+                mode="lines",
+                name="Trend Baseline",
+                line={"color": "#7a7a7a", "width": 2},
+            )
+        )
+
+    fig.add_trace(
+        go.Scatter(
+            x=future_df["ds"],
+            y=future_df["yhat"],
+            mode="lines",
+            name="Forecast",
+            line={"color": "#4f46e5", "width": 3},
+        )
+    )
+
+    fig.add_trace(
+        go.Scatter(
+            x=future_df["ds"],
+            y=future_df["yhat_upper"],
+            mode="lines",
+            line={"width": 0},
+            showlegend=False,
+            hoverinfo="skip",
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=future_df["ds"],
+            y=future_df["yhat_lower"],
+            mode="lines",
+            line={"width": 0},
+            fill="tonexty",
+            fillcolor="rgba(79, 70, 229, 0.18)",
+            name="Confidence Band",
+        )
+    )
+
+    fig.update_layout(
+        template="plotly_dark",
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        margin={"l": 8, "r": 8, "t": 16, "b": 8},
+        xaxis_title=None,
+        yaxis_title="Projected Cost",
+        legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "x": 0},
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def _prepare_forecast_lab_df(forecast_df: pd.DataFrame | None) -> pd.DataFrame | None:
+    required_cols = {"ds", "yhat", "yhat_lower", "yhat_upper"}
+    if forecast_df is None or forecast_df.empty:
+        return None
+    if not required_cols.issubset(set(forecast_df.columns)):
+        return None
+
+    chart_df = forecast_df.copy()
+    chart_df["ds"] = pd.to_datetime(chart_df["ds"], errors="coerce")
+    chart_df = chart_df.dropna(subset=["ds"]).sort_values("ds")
+    if chart_df.empty:
+        return None
+    return chart_df
+
+
+def _render_forecasting_lab_interactive_chart(
+    chart_df: pd.DataFrame, forecast_horizon: int, view_mode: str
+) -> None:
+    future_points = min(forecast_horizon, len(chart_df))
+    if future_points < 1:
+        st.warning("Forecast horizon is too small to render interactive charts.")
+        return
+
+    history_df = chart_df.iloc[:-future_points].tail(max(60, forecast_horizon * 4)).copy()
+    future_df = chart_df.tail(future_points).copy()
+
+    invalid_bounds = (future_df["yhat_lower"] > future_df["yhat_upper"]).any()
+    if invalid_bounds:
+        st.warning("Some confidence bounds are inverted (lower > upper). Review forecast integrity.")
+
+    fig = go.Figure()
+
+    if view_mode == "Forecast":
+        if not history_df.empty:
+            fig.add_trace(
+                go.Scatter(
+                    x=history_df["ds"],
+                    y=history_df["yhat"],
+                    mode="lines",
+                    name="Trend Baseline",
+                    line={"color": "#7a7a7a", "width": 2},
+                )
+            )
+
+        fig.add_trace(
+            go.Scatter(
+                x=future_df["ds"],
+                y=future_df["yhat"],
+                mode="lines",
+                name="Forecast",
+                line={"color": "#4f46e5", "width": 3},
+            )
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=future_df["ds"],
+                y=future_df["yhat_upper"],
+                mode="lines",
+                line={"width": 0},
+                showlegend=False,
+                hoverinfo="skip",
+            )
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=future_df["ds"],
+                y=future_df["yhat_lower"],
+                mode="lines",
+                line={"width": 0},
+                fill="tonexty",
+                fillcolor="rgba(79, 70, 229, 0.18)",
+                name="Confidence Band",
+            )
+        )
+        yaxis_title = "Projected Cost"
+    elif view_mode == "Uncertainty":
+        uncertainty_df = future_df.copy()
+        uncertainty_df["interval_width"] = uncertainty_df["yhat_upper"] - uncertainty_df["yhat_lower"]
+        fig.add_trace(
+            go.Bar(
+                x=uncertainty_df["ds"],
+                y=uncertainty_df["interval_width"],
+                name="Interval Width",
+                marker={"color": "#f59e0b"},
+            )
+        )
+        yaxis_title = "Interval Width"
+    else:
+        delta_df = future_df.copy()
+        delta_df["daily_change"] = delta_df["yhat"].diff().fillna(0.0)
+        fig.add_trace(
+            go.Bar(
+                x=delta_df["ds"],
+                y=delta_df["daily_change"],
+                name="Day-over-Day Change",
+                marker={"color": "#22c55e"},
+            )
+        )
+        yaxis_title = "Forecast Delta"
+
+    fig.update_layout(
+        template="plotly_dark",
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        margin={"l": 8, "r": 8, "t": 16, "b": 8},
+        xaxis_title=None,
+        yaxis_title=yaxis_title,
+        legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "x": 0},
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def _render_interactive_severity_chart(severity_counts: pd.Series) -> None:
+    sev_df = severity_counts.reset_index()
+    sev_df.columns = ["Severity", "Count"]
+
+    fig = px.bar(
+        sev_df,
+        x="Severity",
+        y="Count",
+        color="Severity",
+        color_discrete_map={
+            "High": "#ef4444",
+            "Medium": "#f59e0b",
+            "Low": "#22c55e",
+            "Normal": "#6b7280",
+        },
+    )
+    fig.update_layout(
+        template="plotly_dark",
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        margin={"l": 8, "r": 8, "t": 16, "b": 8},
+        xaxis_title=None,
+        yaxis_title="Tickets",
+        showlegend=False,
+    )
+    st.plotly_chart(fig, use_container_width=True)
 
 
 @st.cache_resource(show_spinner=False)
@@ -237,8 +443,7 @@ def _load_dashboard_models(contamination: float, forecast_horizon: int) -> dict:
     }
 
 
-def render_dashboard(show_topbar: bool = True) -> None:
-    """Render the main dashboard overview page."""
+def render_dashboard() -> None:
     render_page_header(
         title="Dashboard Overview",
         subtitle="Real-time insights into your project risk landscape",
@@ -246,18 +451,13 @@ def render_dashboard(show_topbar: bool = True) -> None:
 
     contamination = float(st.session_state.get("model_anomaly_sensitivity", 0.05))
     forecast_horizon = int(st.session_state.get("model_forecast_horizon", 14))
-    risk_threshold_mode = st.session_state.get("model_risk_threshold", "Balanced")
 
-    controls_col, _ = st.columns([1.5, 4.5])
-    with controls_col:
-        if st.button("Regenerate Models", use_container_width=True):
-            st.cache_resource.clear()
-            LOGGER.info("Dashboard model cache cleared by user")
-            st.rerun()
+    render_top_bar("Portfolio Health", pill_text="Live", pill_kind="success")
 
-    st.caption(
-        f"Anomaly sensitivity: {contamination:.2f} | Forecast horizon: {forecast_horizon} days | Risk mode: {risk_threshold_mode}"
-    )
+    if st.button("Refresh analytics", use_container_width=False):
+        st.cache_resource.clear()
+        LOGGER.info("Dashboard model cache cleared by user")
+        st.rerun()
 
     try:
         dashboard_data = _load_dashboard_models(contamination, forecast_horizon)
@@ -272,97 +472,65 @@ def render_dashboard(show_topbar: bool = True) -> None:
     risk_score = max(0.0, 100.0 - anomaly_rate)
     total_budget = pd.read_csv(DATA_PATH)["Budget_Allocated"].sum()
 
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.metric(label="Global Risk Score", value=f"{risk_score:.1f}")
-        st.markdown(
-            '<div class="micro-copy micro-copy-neutral">Derived from anomaly prevalence</div>',
-            unsafe_allow_html=True,
-        )
-    with col2:
-        st.metric(label="Total Budget", value=f"${total_budget:,.0f}")
-        st.markdown(
-            '<div class="micro-copy micro-copy-neutral">Portfolio-wide budget allocation</div>',
-            unsafe_allow_html=True,
-        )
-    with col3:
-        st.metric(label="Active Tickets", value=f"{len(dashboard_data['anomaly']):,}")
-        st.markdown(
-            '<div class="micro-copy micro-copy-positive">Loaded from current project dataset</div>',
-            unsafe_allow_html=True,
-        )
-    with col4:
-        st.metric(
-            label="Detected Anomalies",
-            value=f"{int(dashboard_data['anomaly']['is_anomaly'].sum())}",
-        )
-        st.markdown(
-            '<div class="micro-copy micro-copy-negative">Isolation Forest flagged records</div>',
-            unsafe_allow_html=True,
-        )
+    kpi1, kpi2, kpi3, kpi4 = st.columns(4)
+    kpi1.metric(label="Risk Score", value=f"{risk_score:.1f}")
+    kpi2.metric(label="Total Budget", value=f"${total_budget:,.0f}")
+    kpi3.metric(label="Active Tickets", value=f"{len(dashboard_data['anomaly']):,}")
+    kpi4.metric(label="Detected Anomalies", value=f"{int(dashboard_data['anomaly']['is_anomaly'].sum())}")
 
-    st.markdown("<div style='height: 2rem'></div>", unsafe_allow_html=True)
+    left, right = st.columns([1.8, 1.2], gap="large")
 
-    col_left, col_right = st.columns([3, 2])
-
-    with col_left:
-        render_section_header("Risk Distribution Over Time")
-        if FORECAST_FIG_PATH.exists():
-            st.image(str(FORECAST_FIG_PATH), use_container_width=True)
-        else:
-            st.warning(
-                "Forecast figure not found. Run forecast figure script to generate it."
-            )
+    with left:
+        render_section_header("Forecast Trajectory")
+        _render_interactive_forecast_chart(
+            dashboard_data["forecast"].get("forecast"),
+            forecast_horizon,
+        )
 
         mape = forecast_metrics.get("mape")
         rmse = forecast_metrics.get("rmse")
         r2 = forecast_metrics.get("r2")
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("MAPE", f"{mape:.2f}%" if mape is not None else "N/A")
-        m2.metric("RMSE", f"{rmse:.2f}" if rmse is not None else "N/A")
-        m3.metric("R²", f"{r2:.3f}" if r2 is not None else "N/A")
-        m4.metric("Forecast Days", str(forecast_horizon))
+        r1c1, r1c2 = st.columns(2)
+        r2c1, r2c2 = st.columns(2)
+        r1c1.metric("MAPE", f"{mape:.2f}%" if mape is not None else "N/A")
+        r1c2.metric("RMSE", f"{rmse:.2f}" if rmse is not None else "N/A")
+        r2c1.metric("R2", f"{r2:.3f}" if r2 is not None else "N/A")
+        r2c2.metric("Forecast Days", str(forecast_horizon))
 
-        forecast_csv = (
-            dashboard_data["forecast"]["forecast"].to_csv(index=False).encode("utf-8")
-        )
-        st.download_button(
-            label="Download Forecast CSV",
-            data=forecast_csv,
-            file_name="phase2_forecast_output.csv",
-            mime="text/csv",
-            use_container_width=True,
-        )
+    with right:
+        render_section_header("Severity Mix")
+        _render_interactive_severity_chart(severity_counts)
 
-    with col_right:
-        render_section_header("Top Risk Drivers (SHAP Proxy)")
-        if SEVERITY_FIG_PATH.exists():
-            st.image(str(SEVERITY_FIG_PATH), use_container_width=True)
-        else:
-            st.warning(
-                "Severity figure not found. Run severity figure script to generate it."
-            )
+        s1, s2, s3 = st.columns(3)
+        s1.metric("High", f"{int(severity_counts['High'])}")
+        s2.metric("Medium", f"{int(severity_counts['Medium'])}")
+        s3.metric("Low", f"{int(severity_counts['Low'])}")
 
+        st.metric("ROC-AUC", f"{dashboard_data['roc_auc']:.3f}")
+
+    col1, col2 = st.columns([2.0, 1.0], gap="large")
+    with col1:
+        render_section_header("Recent Anomaly Alerts")
+        _render_alerts_table(dashboard_data["alerts"])
+
+    with col2:
+        render_section_header("Top Drivers")
         shap_proxy_df = _build_shap_proxy_table(dashboard_data["anomaly"])
         if shap_proxy_df.empty:
             st.info("No anomaly-linked feature contributions available yet.")
         else:
             st.dataframe(shap_proxy_df, hide_index=True, use_container_width=True)
 
-        st.metric("ROC-AUC", f"{dashboard_data['roc_auc']:.3f}")
-        st.caption("ROC-AUC compares domain labels vs anomaly score ranking.")
-        st.metric("High", f"{int(severity_counts['High'])}")
-        st.metric("Medium", f"{int(severity_counts['Medium'])}")
-        st.metric("Low", f"{int(severity_counts['Low'])}")
-        st.metric("Normal", f"{int(severity_counts['Normal'])}")
+    render_section_header("Open selected alert in Ticket Auditor")
+    _render_auditor_selector(dashboard_data["alerts"])
 
-    st.markdown("<div style='height: 2rem'></div>", unsafe_allow_html=True)
-    render_section_header("Recent Anomaly Alerts")
-    _render_alerts_table(dashboard_data["alerts"])
+    from app.components.ieee_metrics import render_ieee_metrics
+
+    render_section_header("Governance")
+    render_ieee_metrics()
 
 
 def _render_alerts_table(alerts_df: pd.DataFrame) -> None:
-    """Render anomaly alerts table in a stable Streamlit grid."""
     if alerts_df.empty:
         st.info("No anomaly alerts available for the current settings.")
         return
@@ -371,21 +539,25 @@ def _render_alerts_table(alerts_df: pd.DataFrame) -> None:
     table_df.columns = ["Timestamp", "Ticket", "Alert Type", "Severity", "Status"]
     st.dataframe(table_df, hide_index=True, use_container_width=True)
 
-    options = list(range(len(table_df)))
+
+def _render_auditor_selector(alerts_df: pd.DataFrame) -> None:
+    if alerts_df.empty:
+        return
+
+    options = list(range(len(alerts_df)))
     selected_idx = st.selectbox(
-        "Open selected alert in Ticket Auditor",
+        "Select alert to audit",
         options=options,
-        format_func=lambda i: f"{table_df.iloc[i]['Ticket']} ({table_df.iloc[i]['Severity']})",
+        format_func=lambda i: f"{alerts_df.iloc[i]['ticket']} ({alerts_df.iloc[i]['severity']})",
     )
-    if st.button("Open in Auditor", use_container_width=True):
-        st.session_state["auditor_ticket_index"] = int(selected_idx)
+    if st.button("Open in Auditor", use_container_width=False):
+        st.session_state["auditor_ticket_index"] = selected_idx
         switched = switch_page_safe(AUDITOR_PAGE)
         if not switched:
             st.warning("Ticket Auditor page is not available in this environment.")
 
 
-def render_forecasting_page(show_topbar: bool = True) -> None:
-    """Fully functional Forecasting Lab page (Phase 2-A)."""
+def render_forecasting_page() -> None:
     render_page_header(
         title="Forecasting Lab",
         subtitle="Prophet-based time-series risk forecasting with sprint seasonality",
@@ -394,16 +566,15 @@ def render_forecasting_page(show_topbar: bool = True) -> None:
     contamination = float(st.session_state.get("model_anomaly_sensitivity", 0.05))
     forecast_horizon = int(st.session_state.get("model_forecast_horizon", 14))
 
-    controls_col, _ = st.columns([1.5, 4.5])
-    with controls_col:
-        if st.button("Regenerate Forecast", use_container_width=True):
-            st.cache_resource.clear()
-            LOGGER.info("Forecast cache cleared by user")
-            st.rerun()
+    render_top_bar("Forecast Run", pill_text=f"{forecast_horizon} days", pill_kind="")
+
+    if st.button("Regenerate forecast", use_container_width=False):
+        st.cache_resource.clear()
+        LOGGER.info("Forecast cache cleared by user")
+        st.rerun()
 
     st.caption(
-        f"Forecast horizon: **{forecast_horizon} days** | Anomaly sensitivity: {contamination:.2f} | "
-        "Model: Facebook Prophet with 14-day sprint seasonality"
+        f"Forecast horizon: {forecast_horizon} days · Anomaly sensitivity: {contamination:.2f} · Model: Prophet"
     )
 
     try:
@@ -417,25 +588,28 @@ def render_forecasting_page(show_topbar: bool = True) -> None:
     forecast_metrics = dashboard_data["forecast"].get("metrics") or {}
     forecast_meta = dashboard_data["forecast"].get("metadata") or {}
 
-    # --- KPI row ---
     mape = forecast_metrics.get("mape")
     rmse = forecast_metrics.get("rmse")
     r2 = forecast_metrics.get("r2")
     m1, m2, m3, m4 = st.columns(4)
-    m1.metric("MAPE", f"{mape:.2f}%" if mape is not None else "N/A", help="Mean Absolute Percentage Error")
-    m2.metric("RMSE", f"{rmse:.2f}" if rmse is not None else "N/A", help="Root Mean Squared Error")
-    m3.metric("R²", f"{r2:.3f}" if r2 is not None else "N/A", help="Coefficient of determination")
+    m1.metric("MAPE", f"{mape:.2f}%" if mape is not None else "N/A")
+    m2.metric("RMSE", f"{rmse:.2f}" if rmse is not None else "N/A")
+    m3.metric("R2", f"{r2:.3f}" if r2 is not None else "N/A")
     m4.metric("Forecast Days", str(forecast_horizon))
 
-    st.markdown("<div style='height: 1rem'></div>", unsafe_allow_html=True)
     render_section_header("Forecast: Cost Risk Trajectory")
+    view_mode = st.radio(
+        "Chart view",
+        options=["Forecast", "Uncertainty", "Daily Change"],
+        horizontal=True,
+    )
 
-    # Static figure if available; live data fallback
-    if FORECAST_FIG_PATH.exists():
+    chart_df = _prepare_forecast_lab_df(forecast_df)
+    if chart_df is not None:
+        _render_forecasting_lab_interactive_chart(chart_df, forecast_horizon, view_mode)
+    elif FORECAST_FIG_PATH.exists():
         st.image(str(FORECAST_FIG_PATH), use_container_width=True)
-        st.caption(
-            "Pre-generated Prophet forecast figure. Click 'Regenerate Forecast' to refresh."
-        )
+        st.caption("Pre-generated Prophet forecast figure.")
     elif forecast_df is not None and not forecast_df.empty:
         st.line_chart(
             forecast_df.set_index("ds")[["yhat", "yhat_lower", "yhat_upper"]].tail(
@@ -445,57 +619,53 @@ def render_forecasting_page(show_topbar: bool = True) -> None:
     else:
         st.warning("Forecast figure not available. Run the forecast figure generation script.")
 
-    render_section_header("Prophet Model Configuration")
+    render_section_header("Prophet Configuration")
     seasonalities = forecast_meta.get("seasonalities", [])
     training_periods = forecast_meta.get("training_periods", "N/A")
     col_a, col_b = st.columns(2)
     col_a.markdown(
         f"""
-        **Seasonalities Modelled:** {', '.join(seasonalities) if seasonalities else 'weekly'}  
+        **Seasonalities:** {', '.join(seasonalities) if seasonalities else 'weekly'}  
         **Training Periods:** {training_periods} data points  
-        **Changepoint Prior:** 0.05 (default)  
-        **Sprint Cycle:** 14-day Fourier seasonality (order 3)
+        **Changepoint Prior:** 0.05  
+        **Sprint Cycle:** 14-day Fourier seasonality
         """
     )
     col_b.markdown(
         """
         **Validation Method:** 80/20 train-test split  
-        **Metrics Computed:** MAPE, RMSE, R²  
+        **Metrics Computed:** MAPE, RMSE, R2  
         **Confidence Intervals:** 80% and 95%  
         **Growth Type:** Linear
         """
     )
 
     if forecast_df is not None and not forecast_df.empty:
-        st.markdown("<div style='height: 0.5rem'></div>", unsafe_allow_html=True)
         forecast_csv = forecast_df.to_csv(index=False).encode("utf-8")
         st.download_button(
-            label="Download Full Forecast CSV",
+            label="Download full forecast CSV",
             data=forecast_csv,
             file_name="prophet_forecast_output.csv",
             mime="text/csv",
-            use_container_width=True,
+            use_container_width=False,
         )
 
 
-def render_anomaly_page(show_topbar: bool = True) -> None:
-    """Fully functional Anomaly Triage Board page (Phase 2-B)."""
+def render_anomaly_page() -> None:
     render_page_header(
         title="Anomaly Triage Board",
-        subtitle="Isolation Forest anomaly detection with severity ranking and SHAP-proxy attribution",
+        subtitle="Isolation Forest anomaly detection with severity ranking",
     )
 
     contamination = float(st.session_state.get("model_anomaly_sensitivity", 0.05))
     forecast_horizon = int(st.session_state.get("model_forecast_horizon", 14))
 
-    controls_col, _ = st.columns([1.5, 4.5])
-    with controls_col:
-        if st.button("Refresh Anomalies", use_container_width=True):
-            st.cache_resource.clear()
-            LOGGER.info("Anomaly cache cleared by user")
-            st.rerun()
+    render_top_bar("Anomaly Triage", pill_text=f"Sensitivity {contamination:.2f}", pill_kind="")
 
-    st.caption(f"Isolation Forest | Contamination: {contamination:.2f} | n_estimators: 100")
+    if st.button("Refresh anomalies", use_container_width=False):
+        st.cache_resource.clear()
+        LOGGER.info("Anomaly cache cleared by user")
+        st.rerun()
 
     try:
         dashboard_data = _load_dashboard_models(contamination, forecast_horizon)
@@ -509,7 +679,6 @@ def render_anomaly_page(show_topbar: bool = True) -> None:
     roc_auc = dashboard_data["roc_auc"]
     alerts_table = dashboard_data["alerts"]
 
-    # --- KPI row ---
     anomaly_rate = anomaly_results["is_anomaly"].mean() * 100.0
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Anomaly Rate", f"{anomaly_rate:.2f}%")
@@ -517,10 +686,8 @@ def render_anomaly_page(show_topbar: bool = True) -> None:
     c3.metric("High Severity", int(severity_counts["High"]))
     c4.metric("Total Anomalies", int(anomaly_results["is_anomaly"].sum()))
 
-    st.markdown("<div style='height: 1rem'></div>", unsafe_allow_html=True)
-
-    col_left, col_right = st.columns([3, 2])
-    with col_left:
+    left, right = st.columns([3, 2])
+    with left:
         render_section_header("Severity Distribution")
         if SEVERITY_FIG_PATH.exists():
             st.image(str(SEVERITY_FIG_PATH), use_container_width=True)
@@ -531,9 +698,10 @@ def render_anomaly_page(show_topbar: bool = True) -> None:
 
         render_section_header("Recent Anomaly Alerts")
         _render_alerts_table(alerts_table)
+        _render_auditor_selector(alerts_table)
 
-    with col_right:
-        render_section_header("Top Risk Drivers (SHAP Proxy)")
+    with right:
+        render_section_header("Top Risk Drivers")
         shap_proxy_df = _build_shap_proxy_table(anomaly_results)
         if shap_proxy_df.empty:
             st.info("No feature contribution data available.")
@@ -545,10 +713,8 @@ def render_anomaly_page(show_topbar: bool = True) -> None:
             count = int(severity_counts[level])
             st.metric(level, count)
 
-        st.caption("ROC-AUC compares domain-derived labels vs Isolation Forest anomaly scores.")
+        st.caption("ROC-AUC compares domain-derived labels vs anomaly scores.")
 
-    # Full anomaly data export
-    st.markdown("<div style='height: 1rem'></div>", unsafe_allow_html=True)
     render_section_header("Raw Anomaly Data")
     severity_filter = st.selectbox(
         "Filter by Severity",
@@ -564,19 +730,27 @@ def render_anomaly_page(show_topbar: bool = True) -> None:
     if anomaly_only:
         display_df = display_df[display_df["is_anomaly"]]
 
-    cols_to_show = [c for c in [
-        "is_anomaly", "anomaly_score", "severity",
-        "budget_overrun_pct", "days_overrun_pct",
-        "efficiency_score", "cost_efficiency",
-        "feature_contributions",
-    ] if c in display_df.columns]
+    cols_to_show = [
+        c
+        for c in [
+            "is_anomaly",
+            "anomaly_score",
+            "severity",
+            "budget_overrun_pct",
+            "days_overrun_pct",
+            "efficiency_score",
+            "cost_efficiency",
+            "feature_contributions",
+        ]
+        if c in display_df.columns
+    ]
     st.dataframe(display_df[cols_to_show].head(200), use_container_width=True, hide_index=False)
 
     csv_bytes = display_df.to_csv(index=False).encode("utf-8")
     st.download_button(
-        label="Download Anomaly Report (CSV)",
+        label="Download anomaly report (CSV)",
         data=csv_bytes,
         file_name="anomaly_triage_report.csv",
         mime="text/csv",
-        use_container_width=True,
+        use_container_width=False,
     )

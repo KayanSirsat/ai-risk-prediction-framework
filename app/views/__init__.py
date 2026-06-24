@@ -11,16 +11,16 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from app.views.auditor import render_auditor
-    from app.views.dashboard import (
+    from .auditor import render_auditor
+    from .dashboard import (
         render_anomaly_page,
         render_dashboard,
         render_forecasting_page,
     )
-    from app.views.jira_sync import render_jira_sync_page
-    from app.views.login import render_login_view
-    from app.views.settings import render_settings
-    from app.views.what_if import render_what_if_page
+    from .jira_sync import render_jira_sync_page
+    from .login import render_login_view
+    from .settings import render_settings
+    from .what_if import render_what_if_page
 
 __all__ = [
     "render_auditor",

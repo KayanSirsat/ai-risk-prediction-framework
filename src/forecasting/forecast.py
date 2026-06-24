@@ -21,25 +21,15 @@ from sklearn.metrics import mean_absolute_percentage_error, mean_squared_error, 
 logger = logging.getLogger('forecasting')
 logger.setLevel(logging.INFO)
 
-# Create logs directory if it doesn't exist
-log_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'logs')
-os.makedirs(log_dir, exist_ok=True)
-
-# Create handlers
-console_handler = logging.StreamHandler()
-file_handler = logging.FileHandler(os.path.join(log_dir, 'forecasting_audit.log'))
-
-# Format for IEEE documentation
-formatter = logging.Formatter(
-    '%(asctime)s | %(name)s | %(levelname)s | %(funcName)s:%(lineno)d | %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
-)
-
-console_handler.setFormatter(formatter)
-file_handler.setFormatter(formatter)
-
-logger.addHandler(console_handler)
-logger.addHandler(file_handler)
+if not logger.handlers:
+    console_handler = logging.StreamHandler()
+    formatter = logging.Formatter(
+        '%(asctime)s | %(name)s | %(levelname)s | %(funcName)s:%(lineno)d | %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    console_handler.setFormatter(formatter)
+    logger.addHandler(console_handler)
+    logger.propagate = False
 
 # Configuration constants
 DEFAULT_CONFIG = {
@@ -158,59 +148,51 @@ class ProjectForecaster:
             raise
         
         self.logger.info(f"Starting forecast generation for metric '{metric_column}'")
+
+        # Normalize dates if needed
+        df_normalized = self._normalize_dates(data, date_column)
+
+        # Prepare Prophet format (ds, y)
+        df_prophet = self._prepare_prophet_data(df_normalized, metric_column, date_column)
+
+        # Initialize and fit model
+        model = self._initialize_model()
+        model = self._fit_model(df_prophet, model)
         
-        try:
-            # Validate input data
-            self._validate_data(data, metric_column)
-
-            # Normalize dates if needed
-            df_normalized = self._normalize_dates(data, date_column)
-
-            # Prepare Prophet format (ds, y)
-            df_prophet = self._prepare_prophet_data(df_normalized, metric_column, date_column)
-
-            # Initialize and fit model
-            model = self._initialize_model()
-            model = self._fit_model(df_prophet, model)
+        # Generate forecast
+        future = model.make_future_dataframe(periods=periods)
+        forecast = model.predict(future)
+        
+        # Extract required columns
+        forecast_output = forecast[['ds', 'yhat', 'yhat_lower', 'yhat_upper']]
+        
+        # Calculate metrics if requested
+        metrics = None
+        if include_metrics and len(df_prophet) >= 10:  # Need sufficient data for split
+            metrics = self._calculate_metrics(model, df_prophet)
+        
+        # Extract components if requested
+        components = None
+        if include_components:
+            components = self._extract_components(model, forecast)
+        
+        # Build metadata
+        metadata = self._build_metadata(df_prophet, periods, model)
+        
+        result = {
+            'forecast': forecast_output,
+            'model': model,
+            'metadata': metadata
+        }
+        
+        if include_metrics:
+            result['metrics'] = metrics
             
-            # Generate forecast
-            future = model.make_future_dataframe(periods=periods)
-            forecast = model.predict(future)
+        if include_components:
+            result['components'] = components
             
-            # Extract required columns
-            forecast_output = forecast[['ds', 'yhat', 'yhat_lower', 'yhat_upper']]
-            
-            # Calculate metrics if requested
-            metrics = None
-            if include_metrics and len(df_prophet) >= 10:  # Need sufficient data for split
-                metrics = self._calculate_metrics(model, df_prophet)
-            
-            # Extract components if requested
-            components = None
-            if include_components:
-                components = self._extract_components(model, forecast)
-            
-            # Build metadata
-            metadata = self._build_metadata(df_prophet, periods, model)
-            
-            result = {
-                'forecast': forecast_output,
-                'model': model,
-                'metadata': metadata
-            }
-            
-            if include_metrics:
-                result['metrics'] = metrics
-                
-            if include_components:
-                result['components'] = components
-                
-            self.logger.info(f"Forecast generated: {periods} periods ahead")
-            return result
-            
-        except Exception as e:
-            self.logger.error(f"Forecasting failed: {str(e)}")
-            raise
+        self.logger.info(f"Forecast generated: {periods} periods ahead")
+        return result
     
     def _validate_data(self, data: pd.DataFrame, metric_column: str) -> None:
         """Validate input data meets requirements."""

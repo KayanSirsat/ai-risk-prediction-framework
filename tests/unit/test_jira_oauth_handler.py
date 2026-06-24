@@ -119,8 +119,9 @@ def test_jira_client_sync_issues_returns_mapped_rows():
 
 
 def test_jira_client_requires_auth_mode():
-    with pytest.raises(JiraConnectionError):
-        JiraAPIClient(
-            base_url="https://example.atlassian.net",
-            project_key="RISK",
-        )
+    with patch.object(JiraAPIClient, "load_cached_tokens", return_value={}):
+        with pytest.raises(JiraConnectionError):
+            JiraAPIClient(
+                base_url="https://example.atlassian.net",
+                project_key="RISK",
+            )

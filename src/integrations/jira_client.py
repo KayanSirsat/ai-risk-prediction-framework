@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
+import os
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -11,7 +13,8 @@ from typing import Any, Dict, List, Optional
 from urllib import parse, request
 from urllib.error import HTTPError, URLError
 
-from src.integrations.oauth_handler import JiraOAuthHandler
+from .oauth_handler import JiraOAuthHandler
+from src.config import get_jira_story_points_field, get_jira_workday_hours
 
 
 class JiraConnectionError(Exception):
@@ -49,6 +52,8 @@ class JiraCredentials:
 class JiraAPIClient:
     """Lightweight Jira REST client for project issue ingestion."""
 
+    TOKEN_CACHE_PATH = Path(os.getenv("JIRA_TOKEN_CACHE_PATH", ".jira_tokens.json"))
+
     def __init__(
         self,
         base_url: str,
@@ -62,6 +67,13 @@ class JiraAPIClient:
         oauth_handler: Optional[JiraOAuthHandler] = None,
         timeout_seconds: int = 20,
     ) -> None:
+        if not access_token:
+            cached = self.load_cached_tokens()
+            access_token = cached.get("access_token", "")
+            cloud_id = cloud_id or cached.get("cloud_id", "")
+            refresh_token = cached.get("refresh_token", "")
+            token_expires_at = float(cached.get("token_expires_at", 0.0))
+
         has_basic = bool(user_email and api_token)
         has_oauth = bool(access_token)
         if not base_url or not project_key or (not has_basic and not has_oauth):
@@ -78,8 +90,24 @@ class JiraAPIClient:
             token_expires_at=float(token_expires_at or 0.0),
         )
         self.timeout_seconds = timeout_seconds
+        if oauth_handler is None and refresh_token:
+            try:
+                oauth_handler = JiraOAuthHandler.from_env()
+            except Exception:
+                oauth_handler = None
+
         self.oauth_handler = oauth_handler
         self.logger = self._setup_logger()
+
+        if self.credentials.access_token:
+            self.save_cached_tokens(
+                {
+                    "access_token": self.credentials.access_token,
+                    "refresh_token": self.credentials.refresh_token,
+                    "token_expires_at": self.credentials.token_expires_at,
+                    "cloud_id": self.credentials.cloud_id,
+                }
+            )
 
     def _setup_logger(self) -> logging.Logger:
         logger = logging.getLogger("jira.integration")
@@ -111,7 +139,6 @@ class JiraAPIClient:
                 "utf-8"
             )
         )
-        import base64
 
         auth_token = base64.b64encode(token_bytes).decode("ascii")
         return {
@@ -132,7 +159,7 @@ class JiraAPIClient:
 
         if not self.oauth_handler or not self.credentials.refresh_token:
             raise JiraConnectionError(
-                "Jira OAuth token expired and refresh configuration is missing"
+                "Jira OAuth token expired. Please re-authorize via the Jira Sync page."
             )
 
         refreshed = self.oauth_handler.refresh_access_token(
@@ -161,6 +188,11 @@ class JiraAPIClient:
                 return json.loads(resp.read().decode("utf-8"))
         except HTTPError as exc:
             body = exc.read().decode("utf-8", errors="ignore") if exc.fp else ""
+            self.logger.error("Jira HTTP %d: %s", exc.code, body[:300])
+            if exc.code == 401:
+                raise JiraConnectionError(
+                    "Jira OAuth token is invalid or expired. Please re-authorize via the Jira Sync page."
+                ) from exc
             if exc.code == 400 and "jql" in body.lower():
                 raise InvalidJQLError(body or "Invalid JQL query") from exc
             if exc.code == 429:
@@ -172,39 +204,40 @@ class JiraAPIClient:
         except URLError as exc:
             raise JiraConnectionError(f"Jira network error: {exc}") from exc
 
-    def handle_rate_limiting(
-        self, retry_count: int = 3, backoff_seconds: float = 1.5
-    ) -> None:
-        """Sleep with exponential backoff used after rate-limit responses."""
-        for attempt in range(retry_count):
-            sleep_for = backoff_seconds * (2**attempt)
-            self.logger.warning("Rate limited by Jira; retrying in %.1fs", sleep_for)
-            time.sleep(sleep_for)
-
     def fetch_issues(
         self, jql_query: str, max_results: int = 1000
     ) -> List[Dict[str, Any]]:
         """Fetch Jira issues using JQL with pagination."""
         issues: List[Dict[str, Any]] = []
         start_at = 0
-        page_size = 100
+        page_size = max(100, min(1000, max_results))
 
+        self.logger.info("Jira JQL query: %s", jql_query)
+
+        sp_field = get_jira_story_points_field()
         while start_at < max_results:
             params = {
                 "jql": jql_query,
                 "startAt": start_at,
                 "maxResults": min(page_size, max_results - start_at),
-                "fields": "summary,description,priority,issuetype,customfield_10016,timeoriginalestimate,timespent,created,updated,status",
+                "fields": f"summary,description,priority,issuetype,{sp_field},timeoriginalestimate,timespent,created,updated,status",
             }
             try:
                 payload = self._request_json("/rest/api/3/search", params)
             except JiraHTTPStatusError as exc:
-                if exc.status_code != 410:
+                if exc.status_code not in (410, 404):
                     raise
                 self.logger.info(
-                    "Jira /rest/api/3/search returned HTTP 410; retrying with /rest/api/3/search/jql"
+                    "Jira /rest/api/3/search returned HTTP %d; retrying with /rest/api/3/search/jql",
+                    exc.status_code,
                 )
-                payload = self._request_json("/rest/api/3/search/jql", params)
+                try:
+                    payload = self._request_json("/rest/api/3/search/jql", params)
+                except JiraHTTPStatusError:
+                    self.logger.info(
+                        "Jira /rest/api/3/search/jql also failed; retrying with /rest/api/2/search"
+                    )
+                    payload = self._request_json("/rest/api/2/search", params)
             page = payload.get("issues", [])
             if not page:
                 break
@@ -218,11 +251,8 @@ class JiraAPIClient:
         return issues
 
     def default_jql(self) -> str:
-        """Return default project-scoped JQL for active issues."""
-        return (
-            f"project = {self.credentials.project_key} "
-            "AND statusCategory != Done ORDER BY updated DESC"
-        )
+        """Return default project-scoped JQL for all issues."""
+        return f"project = {self.credentials.project_key}"
 
     def sync_issues(
         self,
@@ -260,19 +290,42 @@ class JiraAPIClient:
         if cloud_id is not None:
             self.credentials.cloud_id = cloud_id
 
-    def fetch_issue_by_key(self, issue_key: str) -> Dict[str, Any]:
-        """Fetch a single issue by Jira key."""
-        return self._request_json(f"/rest/api/3/issue/{issue_key}")
+        if self.credentials.access_token:
+            self.save_cached_tokens(
+                {
+                    "access_token": self.credentials.access_token,
+                    "refresh_token": self.credentials.refresh_token,
+                    "token_expires_at": self.credentials.token_expires_at,
+                    "cloud_id": self.credentials.cloud_id,
+                }
+            )
 
-    def subscribe_to_webhooks(self, callback_url: str) -> Dict[str, str]:
-        """Return webhook registration guidance payload for manual setup."""
-        payload = {
-            "status": "manual_required",
-            "message": "Create webhook in Jira admin UI pointing to callback_url",
-            "callback_url": callback_url,
-        }
-        self.logger.info("Webhook subscription requires manual Jira admin action")
-        return payload
+    @classmethod
+    def load_cached_tokens(cls) -> Dict[str, Any]:
+        """Load cached OAuth tokens from disk."""
+        if not cls.TOKEN_CACHE_PATH.exists():
+            return {}
+        try:
+            payload = json.loads(cls.TOKEN_CACHE_PATH.read_text(encoding="utf-8"))
+            if not isinstance(payload, dict):
+                return {}
+            return payload
+        except (OSError, json.JSONDecodeError):
+            return {}
+
+    @classmethod
+    def save_cached_tokens(cls, payload: Dict[str, Any]) -> None:
+        """Persist OAuth tokens to disk."""
+        cls.TOKEN_CACHE_PATH.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+    @classmethod
+    def clear_cached_tokens(cls) -> None:
+        """Remove OAuth tokens from disk."""
+        if cls.TOKEN_CACHE_PATH.exists():
+            try:
+                cls.TOKEN_CACHE_PATH.unlink()
+            except OSError:
+                pass
 
     def extract_metrics(self, issue: Dict[str, Any]) -> Dict[str, Any]:
         """Map Jira issue fields to model-ready metrics used by dashboard engines."""
@@ -280,30 +333,30 @@ class JiraAPIClient:
         summary = fields.get("summary") or ""
         description = fields.get("description") or ""
 
-        story_points = fields.get("customfield_10016")
-        story_points = float(story_points) if story_points is not None else 3.0
+        # Extract Story Points
+        sp_field = get_jira_story_points_field()
+        story_points = fields.get(sp_field)
+        story_points = float(story_points) if story_points is not None else 0.0
 
+        workday_seconds = get_jira_workday_hours() * 3600.0
         estimated_seconds = fields.get("timeoriginalestimate") or 0
         spent_seconds = fields.get("timespent") or 0
-        estimated_days = max(1.0, round(float(estimated_seconds) / 28800.0, 2))
-        actual_days = max(1.0, round(float(spent_seconds) / 28800.0, 2))
-
-        budget_allocated = float(max(500.0, story_points * 250.0))
-        cost_consumed = float(max(400.0, actual_days * 220.0 + story_points * 40.0))
+        estimated_days = max(0.0, round(float(estimated_seconds) / workday_seconds, 2))
+        actual_days = max(0.0, round(float(spent_seconds) / workday_seconds, 2))
 
         priority = (fields.get("priority") or {}).get("name", "Medium")
         issue_type = (fields.get("issuetype") or {}).get("name", "Task")
+        
+        assignee = fields.get("assignee")
+        assignee_name = assignee.get("displayName", "Unassigned") if assignee else "Unassigned"
 
         return {
             "Priority": priority,
             "Issue_Type": issue_type,
-            "Assignee_Seniority": "Senior",
+            "Assignee_Name": assignee_name,
             "Story_Points": story_points,
             "Estimated_Days": estimated_days,
             "Actual_Days": actual_days,
-            "Budget_Allocated": budget_allocated,
-            "Cost_Consumed": cost_consumed,
             "Summary": summary,
             "Description": description,
-            "Risk_Level": "Medium",
         }

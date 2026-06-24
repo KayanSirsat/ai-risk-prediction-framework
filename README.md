@@ -27,9 +27,9 @@ An end-to-end AI system for **predicting, explaining, and mitigating project ris
 | Jira REST API Integration (pagination + backoff) | `src/integrations/` | ✅ |
 | OAuth 2.0 (3-Legged) Authentication | `src/integrations/` | ✅ |
 | Streamlit Dashboard (7 pages) | `app/` | ✅ |
-| Login / Signup with persistent user store | `app/views/login.py` | ✅ |
+| SQLite-Based Authentication (PBKDF2) | `src/database/` | ✅ |
 | Settings persistence across sessions | `app/views/settings.py` | ✅ |
-| IEEE-ready Paper Plots (ROC-AUC, Confusion Matrix, SHAP) | `src/training/` | ✅ |
+| IEEE-Ready Paper Plots (ROC-AUC, Confusion Matrix, SHAP) | `src/training/` | ✅ |
 
 ---
 
@@ -84,7 +84,7 @@ ai-risk-prediction-framework/
 │   └── integrations/           # Jira REST client + OAuth 2.0 handler
 ├── models/                     # Serialized model artefacts (.pkl)
 ├── data/                       # Datasets (ml_ready_data.csv, raw_jira_data.csv)
-├── tests/                      # 76 tests (76 passing)
+├── tests/                      # 82 tests (82 passing)
 │   ├── unit/                   # 5 unit test files
 │   └── integration/            # 4 integration test files
 ├── docs/                       # PRDs, architecture & compliance docs
@@ -110,7 +110,7 @@ ai-risk-prediction-framework/
 .venv\Scripts\python.exe -m pytest tests/ --cov=src --cov-report=html
 ```
 
-**Current:** 76/76 passing ✅
+**Current:** 82/82 passing ✅
 
 ---
 

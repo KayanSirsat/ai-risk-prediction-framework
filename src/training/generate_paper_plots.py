@@ -48,55 +48,43 @@ def generate_publication_plots():
     # 3. Generate predictions and probabilities
     print("[INFO] Generating test set predictions...")
 
-    # Check if loaded object is a Pipeline or just a classifier
-    if hasattr(pipeline, "named_steps"):
-        preprocessor = pipeline.named_steps["preprocessor"]
-        classifier = pipeline.named_steps["classifier"]
-        X_test_transformed = preprocessor.transform(X_test)
-    else:
-        # If only the classifier was saved, we need to handle preprocessing manually
-        print("[WARN] Loaded object is a classifier, not a full pipeline.")
-        print("[INFO] Applying manual preprocessing for compatibility...")
-        classifier = pipeline
+    # The model is saved as raw XGBoost classifier (not a Pipeline), so preprocess manually
+    classifier = pipeline
+    import re
 
-        # Manual preprocessing matching the training pipeline exactly (train.py)
-        import re
+    X_prep = X_test.copy()
 
-        X_prep = X_test.copy()
+    # Drop leakage columns (same as train.py)
+    leakage_cols = ["Actual_Days", "Cost_Consumed"]
+    X_prep = X_prep.drop(columns=[c for c in leakage_cols if c in X_prep.columns])
 
-        # Drop leakage columns (same as train.py)
-        leakage_cols = ["Actual_Days", "Cost_Consumed"]
-        X_prep = X_prep.drop(columns=[c for c in leakage_cols if c in X_prep.columns])
+    # Drop text/ID columns (same as train.py)
+    text_cols = ["Summary", "Description", "Developer_Comments", "Issue_ID", "Issue_key"]
+    X_prep = X_prep.drop(columns=[c for c in text_cols if c in X_prep.columns])
 
-        # Drop text/ID columns (same as train.py)
-        text_cols = ["Summary", "Description", "Developer_Comments", "Issue_ID", "Issue_key"]
-        X_prep = X_prep.drop(columns=[c for c in text_cols if c in X_prep.columns])
+    # Encode categoricals with <= 15 unique values; drop the rest
+    categorical_cols = X_prep.select_dtypes(include=["object", "category"]).columns
+    to_encode, to_drop = [], []
+    for col in categorical_cols:
+        if X_prep[col].nunique() <= 15:
+            to_encode.append(col)
+        else:
+            to_drop.append(col)
+    if to_drop:
+        X_prep = X_prep.drop(columns=to_drop)
+    if to_encode:
+        X_prep = pd.get_dummies(X_prep, columns=to_encode)
 
-        # Encode categoricals with <= 15 unique values; drop the rest
-        categorical_cols = X_prep.select_dtypes(include=["object", "category"]).columns
-        to_encode, to_drop = [], []
-        for col in categorical_cols:
-            if X_prep[col].nunique() <= 15:
-                to_encode.append(col)
-            else:
-                to_drop.append(col)
-        if to_drop:
-            X_prep = X_prep.drop(columns=to_drop)
-        if to_encode:
-            X_prep = pd.get_dummies(X_prep, columns=to_encode)
+    # Sanitize feature names (same as train.py)
+    X_prep.columns = [re.sub(r"[\[\]<]", "_", str(c)) for c in X_prep.columns]
 
-        # Sanitize feature names (same as train.py)
-        X_prep.columns = [re.sub(r"[\[\]<]", "_", str(c)) for c in X_prep.columns]
+    # Align columns to training feature set via feature_columns.pkl if available
+    feat_col_path = os.path.join(MODEL_DIR, "feature_columns.pkl")
+    if os.path.exists(feat_col_path):
+        training_columns = joblib.load(feat_col_path)
+        X_prep = X_prep.reindex(columns=training_columns, fill_value=0)
 
-        # Align columns to training feature set via feature_columns.pkl if available
-        import joblib as _jl
-        import os as _os
-        feat_col_path = os.path.join(MODEL_DIR, "feature_columns.pkl")
-        if _os.path.exists(feat_col_path):
-            training_columns = _jl.load(feat_col_path)
-            X_prep = X_prep.reindex(columns=training_columns, fill_value=0)
-
-        X_test_transformed = X_prep.values
+    X_test_transformed = X_prep.values
 
     y_pred = classifier.predict(X_test_transformed)
     # Ensure y_pred is numeric for the confusion matrix

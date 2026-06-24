@@ -1,4 +1,4 @@
-"""What-If Simulation view (Phase 2-D)."""
+"""What-If Simulation view (minimalist layout)."""
 
 from __future__ import annotations
 
@@ -12,23 +12,12 @@ from app.components.simulation_viewer import (
     render_scenario_panels,
 )
 from app.utils.routes import AUDITOR_PAGE, switch_page_safe
-from app.utils.styles import render_page_header, render_section_header
-from app.views.auditor import DATA_PATH, MODEL_PATH, load_dataset, load_model
+from app.utils.styles import render_page_header, render_section_header, render_top_bar
+from app.views.auditor import DATA_PATH, MODEL_PATH, load_dataset, load_model, _ticket_label
 from src.simulation.what_if_simulator import WhatIfSimulator
 
 
-def _ticket_label(ticket_row: pd.Series, idx: int) -> str:
-    issue_key = ticket_row.get("Issue_key")
-    issue_id = ticket_row.get("Issue_ID")
-    if pd.notna(issue_key):
-        return str(issue_key)
-    if pd.notna(issue_id):
-        return str(issue_id)
-    return f"Ticket #{idx}"
-
-
 def render_what_if_page() -> None:
-    """Render What-If Simulation page."""
     render_page_header(
         title="What-If Simulation",
         subtitle="Test parameter changes and project their risk impact",
@@ -46,6 +35,8 @@ def render_what_if_page() -> None:
     if preselected < 0 or preselected >= len(dataset):
         preselected = 0
 
+    render_top_bar("Scenario Builder", pill_text="Interactive", pill_kind="")
+
     render_section_header("Baseline Ticket")
     ticket_idx = st.selectbox(
         "Ticket",
@@ -58,11 +49,11 @@ def render_what_if_page() -> None:
 
     baseline_row = dataset.iloc[int(ticket_idx)]
 
-    col_title, col_reset = st.columns([4, 1])
-    with col_title:
-        st.markdown("### Parameter Adjustment")
-    with col_reset:
-        if st.button("Reset Scenario", type="secondary", use_container_width=True):
+    c_title, c_reset = st.columns([4, 1])
+    with c_title:
+        st.markdown("#### Parameter Adjustment")
+    with c_reset:
+        if st.button("Reset Scenario", type="secondary", use_container_width=False):
             scenario_keys = [
                 "timeline_ext",
                 "budget_mult",
@@ -77,7 +68,6 @@ def render_what_if_page() -> None:
             st.rerun()
 
     c1, c2, c3 = st.columns(3)
-
     with c1:
         timeline_extension = st.slider(
             "Timeline Extension (days)",
@@ -112,7 +102,7 @@ def render_what_if_page() -> None:
     budget_changed = abs(budget_multiplier - 1.0) > 1e-9
     timeline_changed = timeline_extension != 0
 
-    with st.expander("Advanced Options"):
+    with st.expander("Advanced Options", expanded=False):
         priority_override = st.selectbox(
             "Priority Override",
             options=[None, "Low", "Medium", "High"],
@@ -134,8 +124,8 @@ def render_what_if_page() -> None:
 
     deltas = {
         "timeline_extension_days": float(timeline_extension),
-        "budget_multiplier": float(budget_multiplier),
-        "team_efficiency": float(team_efficiency),
+        "budget_multiplier": budget_multiplier,
+        "team_efficiency": team_efficiency,
         "timeline_changed": timeline_changed,
         "budget_changed": budget_changed,
         "priority_override": priority_override,
@@ -146,21 +136,21 @@ def render_what_if_page() -> None:
     simulated_row = simulator.apply_deltas(baseline_row=baseline_row, deltas=deltas)
     comparison = simulator.compare_scenarios(baseline_row=baseline_row, simulated_row=simulated_row)
 
-    st.markdown("### Scenario Impact")
+    render_section_header("Scenario Impact")
     render_delta_metrics(comparison)
     render_scenario_panels(comparison, model)
     render_input_metrics(simulated_row, comparison)
 
-    st.markdown("### Export")
+    render_section_header("Export")
     render_scenario_export(comparison, baseline_row, simulated_row)
 
-    st.markdown("### Navigation")
+    render_section_header("Navigation")
     nav1, nav2 = st.columns(2)
     with nav1:
-        if st.button("Open Current Ticket in Auditor", use_container_width=True):
+        if st.button("Open Current Ticket in Auditor", use_container_width=False):
             st.session_state["auditor_ticket_index"] = int(ticket_idx)
             switched = switch_page_safe(AUDITOR_PAGE)
             if not switched:
                 st.warning("Ticket Auditor page is not available in this environment.")
     with nav2:
-        st.caption("Tip: from Ticket Auditor, use the new 'Try What-If Scenario' button.")
+        st.caption("Tip: from Ticket Auditor, use the 'Try What-If Scenario' button.")

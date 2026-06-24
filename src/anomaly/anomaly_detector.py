@@ -19,16 +19,18 @@ from sklearn.impute import SimpleImputer
 import joblib
 
 
-# Ensure logs directory exists before configuring file handler
-os.makedirs("logs", exist_ok=True)
-
-# Configure logging
 logger = logging.getLogger(__name__)
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(name)s | %(levelname)s | %(funcName)s:%(lineno)d | %(message)s",
-    handlers=[logging.FileHandler("logs/anomaly_audit.log"), logging.StreamHandler()],
-)
+logger.setLevel(logging.INFO)
+
+if not logger.handlers:
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(
+        logging.Formatter(
+            "%(asctime)s | %(name)s | %(levelname)s | %(funcName)s:%(lineno)d | %(message)s"
+        )
+    )
+    logger.addHandler(console_handler)
+    logger.propagate = False
 
 
 class AnomalyEngine:

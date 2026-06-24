@@ -29,6 +29,7 @@ dependencies = [
     "numpy>=1.26.0",
     "pandas>=2.1.0",
     "scikit-learn>=1.4.0",
+    "imbalanced-learn>=0.12.0",
     "xgboost==2.1.4",
     "prophet>=1.1.5",
     "shap>=0.44.0",
@@ -47,12 +48,15 @@ dev = [
     "pytest-cov",
     "black",
     "flake8",
+    "ipykernel>=6.29.0",
+    "jupyter>=1.0.0",
     "mypy",
+    "pyrefly>=1.0.0",
 ]
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["src*", "tests*"]
+include = ["src*", "app*", "tests*"]
 
 [tool.black]
 line-length = 100
@@ -88,3 +92,8 @@ markers = [
     "slow: Slow running tests",
     "benchmark: Performance benchmark tests",
 ]
+
+[tool.pyrefly]
+python-version = "3.9.0"
+preset = "legacy"
+search-path = ["."]

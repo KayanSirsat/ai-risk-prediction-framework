@@ -1,53 +1,34 @@
 import json
+import sys
 import tempfile
-import pandas as pd
+from pathlib import Path
+
+import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
+import shap
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 import joblib
+from src.preprocessing.feature_engineering import preprocess_features
+
 import os
 import re
-import shap
-import matplotlib.pyplot as plt
 
 # Constants
-MODEL_PATH = "models/xgb_model.pkl"
-DATA_PATH = "data/ml_ready_data.csv"
-OUTPUT_PLOT_PATH = "app/components/shap_summary.png"
+from src.config import Paths
+
+MODEL_PATH = str(Paths.XGB_MODEL)
+DATA_PATH = str(Paths.ML_READY_DATA)
+OUTPUT_PLOT_PATH = str(Paths.SHAP_SUMMARY_IMG)
 
 
 def preprocess_for_shap(df: pd.DataFrame) -> tuple:
-    """
-    Replicates the same preprocessing steps from train.py so that the
-    feature matrix fed to SHAP matches exactly what the model was trained on.
-    Returns (X_processed_df, feature_names).
-    """
-    if "Risk_Level" in df.columns:
-        df = df.drop(columns=["Risk_Level"])
-
-    leakage_cols = ["Actual_Days", "Cost_Consumed"]
-    df = df.drop(columns=[c for c in leakage_cols if c in df.columns])
-
-    text_cols = ["Summary", "Description", "Developer_Comments", "Issue_ID", "Issue_key"]
-    df = df.drop(columns=[c for c in text_cols if c in df.columns])
-
-    categorical_cols = df.select_dtypes(include=["object", "category"]).columns
-    to_encode, to_drop = [], []
-    for col in categorical_cols:
-        if df[col].nunique() <= 15:
-            to_encode.append(col)
-        else:
-            to_drop.append(col)
-
-    if to_drop:
-        print(f"[INFO] Dropping high-cardinality columns: {to_drop}")
-        df = df.drop(columns=to_drop)
-
-    if to_encode:
-        print(f"[INFO] One-hot encoding columns: {to_encode}")
-        df = pd.get_dummies(df, columns=to_encode)
-
-    df.columns = [re.sub(r'[\[\]<]', '_', str(c)) for c in df.columns]
-
-    return df, list(df.columns)
+    X = preprocess_features(df, verbose=True)
+    return X, list(X.columns)
 
 
 def patch_booster_base_score(booster):

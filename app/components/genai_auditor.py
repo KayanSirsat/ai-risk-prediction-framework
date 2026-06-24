@@ -9,7 +9,8 @@ MITIGATION_TTL = 600  # 10 minutes
 def render_mitigation_engine(
     ticket_id, risk_level, shap_drivers, audit_context=None, button_key=None
 ):
-    st.subheader("Qwen 3.5 Autonomous Auditor")
+    provider = st.session_state.get("genai_provider", "NVIDIA (Qwen 3.5)")
+    st.subheader(f"{provider} Autonomous Auditor")
 
     if "mitigation_cache" not in st.session_state:
         st.session_state.mitigation_cache = {}
@@ -35,7 +36,7 @@ def render_mitigation_engine(
         if st.button(
             "Generate Mitigation Strategy", type="primary", key=button_key
         ):
-            with st.spinner("Connecting to Qwen 3.5 for analysis..."):
+            with st.spinner(f"Connecting to {provider.split('(')[0].strip()} for analysis..."):
                 ticket_details = {
                     "summary": str(shap_drivers.get("summary", "N/A"))
                     if isinstance(shap_drivers, dict)

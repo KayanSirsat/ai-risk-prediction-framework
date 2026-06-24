@@ -8,7 +8,9 @@ import joblib
 import pandas as pd
 
 
-FEATURE_COLUMNS_PATH = "models/feature_columns.pkl"
+from src.config import Paths
+
+FEATURE_COLUMNS_PATH = str(Paths.FEATURE_COLUMNS)
 
 
 def preprocess_row(ticket_row: pd.Series, dataset: pd.DataFrame) -> pd.DataFrame:

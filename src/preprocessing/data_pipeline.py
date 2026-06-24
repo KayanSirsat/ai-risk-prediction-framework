@@ -7,10 +7,12 @@ import numpy as np
 import pandas as pd
 
 # Constants
-RAW_DATA_PATH = "data/raw_jira_data.csv"
-PROCESSED_DATA_PATH = "data/ml_ready_data.csv"
+from src.config import Paths, get_daily_burn_rate
+
+RAW_DATA_PATH = str(Paths.RAW_JIRA_DATA)
+PROCESSED_DATA_PATH = str(Paths.ML_READY_DATA)
 SAMPLE_SIZE = 10000
-DAILY_BURN_RATE = 500
+DAILY_BURN_RATE = get_daily_burn_rate()
 
 LOGGER = logging.getLogger("preprocessing.pipeline")
 if not LOGGER.handlers:

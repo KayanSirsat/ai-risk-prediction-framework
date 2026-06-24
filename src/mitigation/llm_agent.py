@@ -6,8 +6,10 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+from src.config import get_nvidia_model_name
+
 NVIDIA_API_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
-MODEL_NAME = "qwen/qwen3.5-122b-a10b"
+MODEL_NAME = get_nvidia_model_name()
 API_KEY = os.getenv("NVIDIA_API_KEY")
 
 MAX_RETRIES = 3
@@ -104,52 +106,3 @@ def generate_mitigation_strategy(ticket_details, risk_level, top_risk_factors):
         "reasoning_trace": reasoning_trace,
         "final_strategy": final_strategy,
     }
-
-
-if __name__ == "__main__":
-    dummy_ticket = {
-        "summary": "Implement payment gateway integration for checkout module",
-        "priority": "High",
-        "assignee_seniority": "Junior",
-        "estimated_days": 14,
-        "story_points": 21,
-        "budget_allocated": 15000,
-    }
-    dummy_risk = "High"
-    dummy_factors = [
-        "Assignee_Seniority=Junior",
-        "Story_Points=21",
-        "Estimated_Days=14",
-    ]
-
-    print("=" * 60)
-    print("QWEN 3.5 MITIGATION AGENT - TEST EXECUTION")
-    print("=" * 60)
-
-    result = generate_mitigation_strategy(
-        ticket_details=dummy_ticket,
-        risk_level=dummy_risk,
-        top_risk_factors=dummy_factors,
-    )
-
-    print("\n[IEEE AUDIT TRACE - Reasoning]")
-    print("-" * 60)
-    print(
-        result["reasoning_trace"]
-        if result["reasoning_trace"]
-        else "(No reasoning trace captured)"
-    )
-    print("-" * 60)
-
-    print("\n[FINAL MITIGATION STRATEGY]")
-    print("-" * 60)
-    print(
-        result["final_strategy"]
-        if result["final_strategy"]
-        else "(No strategy generated)"
-    )
-    print("-" * 60)
-
-    print("\n" + "=" * 60)
-    print("EXECUTION COMPLETE")
-    print("=" * 60)

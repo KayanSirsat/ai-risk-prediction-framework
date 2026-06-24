@@ -1,4 +1,4 @@
-"""Jira Sync view with OAuth flow and live issue ingestion."""
+"""Jira Sync view with minimalist layout."""
 
 from __future__ import annotations
 
@@ -9,7 +9,8 @@ from typing import Any, Dict, List
 import pandas as pd
 import streamlit as st
 
-from app.utils.styles import render_page_header, render_section_header
+from app.utils.styles import render_page_header, render_section_header, render_top_bar
+from src.config import Paths
 from src.integrations.jira_client import (
     InvalidJQLError,
     JiraAPIClient,
@@ -19,7 +20,9 @@ from src.integrations.jira_client import (
 from src.integrations.oauth_handler import JiraOAuthError, JiraOAuthHandler
 
 
-DATASET_PATH = "data/ml_ready_data.csv"
+REAL_DATASET_PATH = str(Paths.REAL_JIRA_SNAPSHOT)
+SYNTHETIC_DATASET_PATH = str(Paths.ML_READY_DATA)
+DATASET_PATH = REAL_DATASET_PATH if Paths.REAL_JIRA_SNAPSHOT.exists() else SYNTHETIC_DATASET_PATH
 DEFAULT_MAX_RESULTS = 250
 
 
@@ -66,6 +69,30 @@ def _init_jira_session_state() -> None:
         if key not in st.session_state:
             st.session_state[key] = value
 
+    if not st.session_state.get("jira_access_token"):
+        cached = JiraAPIClient.load_cached_tokens()
+        if cached.get("access_token"):
+            st.session_state["jira_access_token"] = cached.get("access_token", "")
+            st.session_state["jira_refresh_token"] = cached.get("refresh_token", "")
+            st.session_state["jira_expires_at"] = float(cached.get("token_expires_at", 0.0))
+            st.session_state["jira_cloud_id"] = cached.get("cloud_id", "")
+            st.session_state["jira_authenticated"] = True
+
+    expires_at = float(st.session_state.get("jira_expires_at", 0.0) or 0.0)
+    refresh_token = st.session_state.get("jira_refresh_token", "")
+    if st.session_state.get("jira_access_token") and JiraOAuthHandler.is_token_expired(expires_at):
+        if not refresh_token:
+            st.session_state["jira_authenticated"] = False
+            st.session_state["jira_access_token"] = ""
+            st.session_state["jira_sync_error"] = (
+                "Jira token expired and no refresh token is available. "
+                "Please re-authorize via the Jira Sync page."
+            )
+            try:
+                JiraAPIClient.clear_cached_tokens()
+            except Exception:
+                pass
+
 
 def _handler_from_config(config: Dict[str, str]) -> JiraOAuthHandler:
     return JiraOAuthHandler(
@@ -73,45 +100,6 @@ def _handler_from_config(config: Dict[str, str]) -> JiraOAuthHandler:
         client_secret=config["client_secret"],
         redirect_uri=config["redirect_uri"],
     )
-
-
-def handle_oauth_callback() -> None:
-    """Handle Jira OAuth callback and persist token data in session state."""
-    _init_jira_session_state()
-    code = st.query_params.get("code")
-    if not code:
-        return
-
-    config = _config_snapshot()
-    missing = _check_config(config)
-    if missing:
-        st.error(f"Jira OAuth callback failed; missing config: {', '.join(missing)}")
-        return
-
-    state = st.query_params.get("state")
-    expected_state = st.session_state.get("jira_oauth_state")
-    if state and expected_state and state != expected_state:
-        st.error("Jira OAuth state mismatch detected. Please retry authorization.")
-        return
-
-    try:
-        handler = _handler_from_config(config)
-        token_data = handler.exchange_auth_code(str(code))
-        cloud_id = handler.fetch_cloud_id(token_data.get("access_token", ""))
-    except JiraOAuthError as exc:
-        st.session_state["jira_sync_error"] = str(exc)
-        st.error(f"OAuth exchange failed: {exc}")
-        return
-
-    st.session_state["jira_access_token"] = token_data.get("access_token", "")
-    st.session_state["jira_refresh_token"] = token_data.get("refresh_token", "")
-    st.session_state["jira_expires_at"] = float(token_data.get("expires_at", 0.0))
-    st.session_state["jira_cloud_id"] = cloud_id
-    st.session_state["jira_authenticated"] = bool(token_data.get("access_token"))
-    st.session_state["jira_sync_error"] = ""
-    st.query_params.clear()
-    st.success("Jira OAuth connected successfully.")
-    st.rerun()
 
 
 def _build_jira_client(config: Dict[str, str]) -> JiraAPIClient:
@@ -166,6 +154,12 @@ def _render_oauth_controls(config: Dict[str, str]) -> None:
         ]:
             if key in st.session_state:
                 del st.session_state[key]
+
+        try:
+            JiraAPIClient.clear_cached_tokens()
+        except Exception:
+            pass
+
         st.rerun()
 
 
@@ -198,6 +192,25 @@ def _merge_into_dataset(rows: List[Dict[str, Any]], dataset_path: str = DATASET_
         return 0
 
     incoming = pd.DataFrame(_normalize_rows(rows))
+
+    try:
+        from src.preprocessing.data_pipeline import generate_metrics_with_signals, calculate_risk_level
+
+        if "Estimated_Days" in incoming.columns:
+            incoming["Estimated_Days"] = incoming["Estimated_Days"].replace(0.0, 3.0)
+
+        incoming = generate_metrics_with_signals(incoming)
+
+        if "Budget_Allocated" in incoming.columns:
+            incoming["Budget_Allocated"] = incoming["Budget_Allocated"].replace(0.0, 500.0)
+
+        incoming = calculate_risk_level(incoming)
+
+        rows.clear()
+        rows.extend(incoming.to_dict("records"))
+    except Exception as exc:
+        st.warning(f"Could not apply heuristic ML rules to Jira issues: {exc}")
+
     incoming["source_system"] = "jira"
     incoming["synced_at"] = pd.Timestamp.utcnow().isoformat()
 
@@ -220,7 +233,7 @@ def _merge_into_dataset(rows: List[Dict[str, Any]], dataset_path: str = DATASET_
         combined = combined.drop_duplicates(subset=["Issue_key"], keep="last")
 
     combined.to_csv(dataset_path, index=False)
-    return int(len(incoming))
+    return len(incoming)
 
 
 def _sync_now(config: Dict[str, str], jql_query: str, max_results: int) -> None:
@@ -249,19 +262,16 @@ def _sync_now(config: Dict[str, str], jql_query: str, max_results: int) -> None:
 
 def _render_sync_controls(config: Dict[str, str]) -> None:
     render_section_header("Sync Controls")
-    default_query = (
-        f"project = {config['project_key']} "
-        "AND statusCategory != Done ORDER BY updated DESC"
-    )
+    default_query = f"project = {config['project_key']} AND statusCategory != Done ORDER BY updated DESC"
     jql_query = st.text_area("JQL Query", value=default_query, height=88)
 
     c1, c2, c3 = st.columns([1.1, 1, 2])
     with c1:
-        max_results = int(
-            st.number_input("Max Results", min_value=1, max_value=1000, value=DEFAULT_MAX_RESULTS, step=1)
+        max_results = st.number_input(
+            "Max Results", min_value=1, max_value=1000, value=DEFAULT_MAX_RESULTS, step=1
         )
     with c2:
-        if st.button("Sync Now", type="primary", use_container_width=True):
+        if st.button("Sync Now", type="primary", use_container_width=False):
             with st.spinner("Syncing issues from Jira..."):
                 _sync_now(config, jql_query, max_results)
     with c3:
@@ -302,7 +312,6 @@ def _render_sync_results() -> None:
 
 
 def render_jira_sync_page() -> None:
-    """Render Jira Sync page."""
     _init_jira_session_state()
     config = _config_snapshot()
     missing = _check_config(config)
@@ -311,6 +320,8 @@ def render_jira_sync_page() -> None:
         title="Jira Sync",
         subtitle="Authorize Jira OAuth and sync live tickets into the risk pipeline",
     )
+
+    render_top_bar("Jira Connection", pill_text="OAuth", pill_kind="")
 
     if missing:
         st.error(f"Missing Jira configuration in .env: {', '.join(missing)}")

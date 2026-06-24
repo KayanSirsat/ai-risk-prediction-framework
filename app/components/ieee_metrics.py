@@ -10,21 +10,21 @@ def render_ieee_metrics():
         col1, col2 = st.columns(2)
 
         with col1:
-            try:
+            if os.path.exists(CONFUSION_MATRIX_PATH):
                 st.image(
                     CONFUSION_MATRIX_PATH,
                     caption="Confusion Matrix: Risk Level Prediction",
                 )
-            except FileNotFoundError:
+            else:
                 st.warning(
                     "Confusion Matrix not found. Run `generate_paper_plots.py` first."
                 )
 
         with col2:
-            try:
+            if os.path.exists(ROC_CURVE_PATH):
                 st.image(
                     ROC_CURVE_PATH,
                     caption="One-vs-Rest ROC Curve: Risk Level Prediction",
                 )
-            except FileNotFoundError:
+            else:
                 st.warning("ROC Curve not found. Run `generate_paper_plots.py` first.")

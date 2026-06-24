@@ -4,6 +4,53 @@ This file tracks the development history, architectural decisions, and milestone
 
 ---
 
+## [2026-05-06] — Comprehensive Codebase Audit & Refactor
+
+**Phase:** Post-Phase 2 Code Quality & Polish
+**Focus:** Identifying and fixing all bugs, broken code, hardcoded logic, and architectural violations.
+
+### Phase 1 — Critical Fixes (8 items)
+- Fixed broken reference to non-existent `JiraIntegrationClient` in `data_pipeline.py`
+- Removed inverted `src/` → `app/` dependency in `what_if_simulator.py`; extracted shared `feature_alignment.py`
+- Removed duplicate `_validate_data()` call in `forecast.py`
+- Null-safe metric formatting in `generate_forecast_figure.py` for MAPE/RMSE/R²
+- Fixed `FileNotFoundError` (never fires) in `ieee_metrics.py` → proper `os.path.exists()` check
+- Wired dead `render_ieee_metrics()` into Dashboard
+- Removed dead Pipeline branch in `generate_paper_plots.py`
+- Removed unused `show_topbar` parameter from 3 dashboard functions
+
+### Phase 2 — Architectural Improvements (4 items)
+- Created `Paths` class in `src/config.py` as canonical single source of truth for all file paths
+- Created `src/preprocessing/feature_engineering.py` — single preprocessing source for training/SHAP/prediction
+- Refactored `train.py`, `shap_explainer.py`, `ticket_viewer.py` to use shared preprocessor
+- Populated empty `__init__.py` files with proper re-exports (`database`, `training`)
+
+### Phase 3 — Code Quality & Maintainability (7 items)
+- Removed 3 unused `JiraAPIClient` methods (`handle_rate_limiting`, `fetch_issue_by_key`, `subscribe_to_webhooks`)
+- Moved all inner imports to module level; removed redundant imports
+- Cleaned all `__pycache__` directories (1000+ removed)
+- Removed module-level file handler creation (import-time side effects) in `forecast.py` and `anomaly_detector.py`
+- Dynamic provider label in GenAI Auditor (reads from `genai_provider` session state)
+- Removed dead `risk_threshold_mode` variable in dashboard
+- Jira OAuth token persistence fixed: `_init_jira_session_state()` loads from `.jira_tokens.json` on page load
+
+### Phase 4 — Security Hardening (2 items)
+- Raised password minimum from 4 → 8 characters
+- Made `full_name` and `email` configurable via env vars in `bootstrap_admin.py`
+
+### Phase 5 — Testing & CI Improvements (3 items)
+- Rewrote `test_anomaly_engine.py` as proper pytest (7 assertions, was print-based script)
+- Documented label leakage in anomaly ROC test
+- Standardized test imports to package-level
+
+### Achievements
+- All 82 tests passing (previously 76)
+- 19 files modified, ~80 lines of dead code removed
+- 2 new shared modules created (`feature_alignment.py`, `feature_engineering.py`)
+- Documentation fully updated: `ARCHITECTURE.md`, `module_overview.md`, `README.md`
+
+---
+
 ## [2026-04-25] — Audit & Bug-Fix Session
 
 **Phase:** Phase 2 Post-Completion Audit  

@@ -56,7 +56,7 @@ class JiraOAuthHandler:
             client_id=client_id,
             client_secret=client_secret,
             redirect_uri=redirect_uri,
-            scopes=tuple(scopes or ["read:jira-work", "read:jira-user", "read:account"]),
+            scopes=tuple(scopes or ["read:jira-work", "read:jira-user", "read:account", "offline_access"]),
         )
         self.timeout_seconds = timeout_seconds
         self.logger = self._setup_logger()

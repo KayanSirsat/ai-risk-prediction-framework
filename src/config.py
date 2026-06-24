@@ -38,6 +38,36 @@ def get_jira_oauth_settings() -> dict[str, str]:
     }
 
 
+def get_jira_story_points_field() -> str:
+    """Return Jira story points custom field name from env with standard fallback."""
+    load_env_file()
+    return get_env("JIRA_STORY_POINTS_FIELD", "customfield_10016")
+
+
+def get_jira_workday_hours() -> float:
+    """Return workday duration in hours from env with standard fallback."""
+    load_env_file()
+    try:
+        return float(get_env("JIRA_WORKDAY_HOURS", "8.0"))
+    except ValueError:
+        return 8.0
+
+
+def get_nvidia_model_name() -> str:
+    """Return Nvidia LLM model name from env with standard fallback."""
+    load_env_file()
+    return get_env("NVIDIA_MODEL_NAME", "qwen/qwen3.5-122b-a10b")
+
+
+def get_daily_burn_rate() -> float:
+    """Return daily burn rate from env with standard fallback."""
+    load_env_file()
+    try:
+        return float(get_env("DAILY_BURN_RATE", "500.0"))
+    except ValueError:
+        return 500.0
+
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -52,6 +82,7 @@ class Paths:
 
     ML_READY_DATA: Path = DATA_DIR / "ml_ready_data.csv"
     RAW_JIRA_DATA: Path = DATA_DIR / "raw_jira_data.csv"
+    REAL_JIRA_SNAPSHOT: Path = DATA_DIR / "real_jira_snapshot.csv"
     CURATED_ANOMALIES: Path = DATA_DIR / "curated_anomalies.csv"
     AUTH_DB: Path = DATA_DIR / "auth.db"
 

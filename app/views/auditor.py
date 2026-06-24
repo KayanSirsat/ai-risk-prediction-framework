@@ -1,8 +1,9 @@
-"""Ticket auditor view with split-screen explainability and mitigation guidance."""
+"""Ticket auditor view with minimalist layout."""
 
 from __future__ import annotations
 
 import os
+from typing import Any
 
 import pandas as pd
 import streamlit as st
@@ -16,23 +17,102 @@ from app.components.shap_visuals import (
 )
 from app.components.ticket_viewer import render_ticket_context
 from app.utils.routes import WHAT_IF_PAGE, switch_page_safe
-from app.utils.styles import render_page_header, render_section_header
+from app.utils.styles import render_page_header, render_section_header, render_top_bar
+from src.config import Paths
 
-DATA_PATH = "data/ml_ready_data.csv"
-MODEL_PATH = "models/xgb_model.pkl"
+
+REAL_DATA_PATH = str(Paths.REAL_JIRA_SNAPSHOT)
+SYNTHETIC_DATA_PATH = str(Paths.ML_READY_DATA)
+DATA_PATH = REAL_DATA_PATH if Paths.REAL_JIRA_SNAPSHOT.exists() else SYNTHETIC_DATA_PATH
+MODEL_PATH = str(Paths.XGB_MODEL)
+
+
+def parse_adf_description(desc: Any) -> str:
+    import ast
+    import json
+    import re
+
+    if not desc or not isinstance(desc, str):
+        return str(desc) if desc is not None else ""
+
+    desc_str = desc.strip()
+    if not (desc_str.startswith("{") and desc_str.endswith("}")):
+        return desc_str
+
+    parsed = None
+    try:
+        parsed = ast.literal_eval(desc_str)
+    except Exception:
+        try:
+            parsed = json.loads(desc_str)
+        except Exception:
+            pass
+
+    if isinstance(parsed, dict):
+        text_fragments = []
+
+        def extract_text(node):
+            if isinstance(node, dict):
+                if node.get("type") == "text" and "text" in node:
+                    text_fragments.append(str(node["text"]))
+                else:
+                    for val in node.values():
+                        extract_text(val)
+            elif isinstance(node, list):
+                for item in node:
+                    extract_text(item)
+
+        extract_text(parsed)
+        if text_fragments:
+            return "".join(text_fragments)
+
+    matches = re.findall(r"['\"]text['\"]\s*:\s*['\"](.*?)['\"]", desc_str)
+    if matches:
+        return " ".join(matches)
+
+    return desc_str
 
 
 @st.cache_data
-def load_dataset(path: str) -> pd.DataFrame:
-    """Load dataset from CSV with caching."""
-    if os.path.exists(path):
-        return pd.read_csv(path)
-    return None
+def load_dataset(path: str) -> pd.DataFrame | None:
+    if not os.path.exists(path):
+        if "real_jira_snapshot.csv" in path:
+            path = "data/ml_ready_data.csv"
+
+    if not os.path.exists(path):
+        return None
+
+    df = pd.read_csv(path)
+
+    required_cols = ["Estimated_Days", "Budget_Allocated", "Story_Points", "Assignee_Seniority"]
+    missing = [c for c in required_cols if c not in df.columns]
+
+    if missing:
+        import numpy as np
+
+        state = np.random.get_state()
+        np.random.seed(42)
+        try:
+            n_rows = len(df)
+            seniorities = ["Senior", "Junior", "Junior", "Mid", "Senior"]
+            story_pts = [8.0, 3.0, 5.0, 2.0, 8.0]
+
+            if "Assignee_Seniority" not in df.columns:
+                df["Assignee_Seniority"] = [seniorities[i % len(seniorities)] for i in range(n_rows)]
+            if "Story_Points" not in df.columns:
+                df["Story_Points"] = [story_pts[i % len(story_pts)] for i in range(n_rows)]
+
+            from src.preprocessing.data_pipeline import generate_metrics_with_signals
+
+            df = generate_metrics_with_signals(df)
+        finally:
+            np.random.set_state(state)
+
+    return df
 
 
 @st.cache_resource
 def load_model(path: str):
-    """Load ML model from pickle with caching."""
     if os.path.exists(path):
         import joblib
 
@@ -40,35 +120,38 @@ def load_model(path: str):
     return None
 
 
-def render_auditor():
-    """Render the ticket auditor page."""
-
-    # Page header
+def render_auditor() -> None:
     render_page_header(
         title="Ticket Auditor",
         subtitle="Review one ticket at a time with plain-language risk guidance",
     )
 
-    # Load data
     dataset = load_dataset(DATA_PATH)
     model = load_model(MODEL_PATH)
 
-    # Check data availability
     if dataset is None or model is None:
         st.warning("Model or data not available. Please ensure data is generated.")
         return
+
+    if os.path.exists(REAL_DATA_PATH):
+        pill_text = f"Real Jira · {len(dataset)} tickets"
+        pill_kind = "success"
+    else:
+        pill_text = f"Synthetic · {len(dataset)} tickets"
+        pill_kind = "warning"
+
+    render_top_bar("Ticket Focus", pill_text=pill_text, pill_kind=pill_kind)
 
     _render_full_auditor(dataset, model)
 
 
 def _ticket_label(ticket_data: pd.Series, ticket_index: int) -> str:
-    issue_key = ticket_data.get("Issue_key")
-    issue_id = ticket_data.get("Issue_ID")
-    if pd.notna(issue_key):
-        return str(issue_key)
-    if pd.notna(issue_id):
-        return str(issue_id)
-    return f"TICKET-{ticket_index}"
+    risk = ticket_data.get("Risk_Level", "N/A")
+    summary = ticket_data.get("Summary", f"Ticket #{ticket_index}")
+    summary_str = str(summary)
+    if len(summary_str) > 40:
+        summary_str = summary_str[:37] + "..."
+    return f"[{risk}] {summary_str}"
 
 
 def _compute_confidence(model, processed_features: pd.DataFrame, risk_label: str) -> float:
@@ -96,63 +179,97 @@ def _render_split_columns(
     confidence_pct = _compute_confidence(model, processed_features, risk_label)
     _render_risk_banner(risk_label, confidence=confidence_pct / 100)
 
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Estimated Days", f"{ticket_data.get('Estimated_Days', 'N/A')}")
-    m2.metric("Story Points", f"{ticket_data.get('Story_Points', 'N/A')}")
-    m3.metric("Budget", f"${ticket_data.get('Budget_Allocated', 0):,.0f}")
-    m4.metric("Priority", f"{ticket_data.get('Priority', 'N/A')}")
+    raw_desc = ticket_data.get("Description", "")
+    parsed_desc = parse_adf_description(raw_desc)
+    summary_text = ticket_data.get("Summary", "N/A")
 
-    if st.button("🎯 Try What-If Scenario", key=f"what_if_{ticket_index}", use_container_width=True):
-        st.session_state["what_if_ticket_index"] = int(ticket_index)
+    st.markdown(
+        f"""
+        <div class="card" style="margin-bottom: 1.4rem;">
+            <div style="font-weight: 600; font-size: 1rem; color: #ffffff; margin-bottom: 0.6rem;">
+                {summary_text}
+            </div>
+            <div style="font-size: 0.9rem; color: #c2c2c2; line-height: 1.6; white-space: pre-wrap;">
+                {parsed_desc}
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    est_days = ticket_data.get("Estimated_Days")
+    story_pts = ticket_data.get("Story_Points")
+    budget = ticket_data.get("Budget_Allocated")
+    priority_val = ticket_data.get("Priority", "N/A")
+
+    def format_days(val):
+        if pd.isna(val) or val is None:
+            return "N/A"
+        fval = float(val)
+        return f"{int(fval)} days" if fval.is_integer() else f"{fval:.1f} days"
+
+    def format_pts(val):
+        if pd.isna(val) or val is None:
+            return "N/A"
+        fval = float(val)
+        return f"{int(fval)} pts" if fval.is_integer() else f"{fval:.1f} pts"
+
+    days_str = format_days(est_days)
+    pts_str = format_pts(story_pts)
+    budget_str = f"${float(budget):,.0f}" if budget is not None and pd.notna(budget) else "N/A"
+
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Estimated Days", days_str)
+    m2.metric("Story Points", pts_str)
+    m3.metric("Budget", budget_str)
+    m4.metric("Priority", str(priority_val))
+
+    if st.button("Try What-If Scenario", key=f"what_if_{ticket_index}", use_container_width=False):
+        st.session_state["what_if_ticket_index"] = ticket_index
         switched = switch_page_safe(WHAT_IF_PAGE)
         if not switched:
             st.warning("What-If Simulation page is not available in this environment.")
 
-    col1, col2 = st.columns([11, 9])
-
     top_drivers = get_top_driver_names(processed_features, model, top_n=5)
 
-    with col1:
-        st.markdown('<div class="auditor-sticky-title">Why this ticket is risky</div>', unsafe_allow_html=True)
-        st.caption("Top factors that increase risk for this ticket.")
-        st.markdown('<div class="premium-card">', unsafe_allow_html=True)
-        if shap_mode == "Force View":
-            render_shap_force_plot(processed_features, model)
-        else:
-            render_shap_table(processed_features, model)
-        st.markdown("</div>", unsafe_allow_html=True)
+    render_section_header("Why this ticket is risky")
+    st.caption("Top factors that increase risk for this ticket.")
+    st.markdown('<div class="card" style="margin-bottom: 1.2rem;">', unsafe_allow_html=True)
+    if shap_mode == "Force View":
+        render_shap_force_plot(processed_features, model)
+    else:
+        render_shap_table(processed_features, model)
+    st.markdown("</div>", unsafe_allow_html=True)
 
-    with col2:
-        st.markdown('<div class="auditor-sticky-title">Suggested actions</div>', unsafe_allow_html=True)
-        st.caption("Practical steps to lower delivery risk.")
-        st.markdown('<div class="premium-card">', unsafe_allow_html=True)
-        shap_drivers = {
-            "summary": str(ticket_data.get("Summary", "N/A")),
-            "priority": str(ticket_data.get("Priority", "N/A")),
-            "assignee_seniority": str(ticket_data.get("Assignee_Seniority", "N/A")),
-            "estimated_days": int(ticket_data.get("Estimated_Days", 0)),
-            "story_points": int(ticket_data.get("Story_Points", 0)),
-            "budget_allocated": float(ticket_data.get("Budget_Allocated", 0)),
-            "top_factors": top_drivers,
-        }
-        render_mitigation_engine(
-            ticket_index,
-            risk_label,
-            shap_drivers,
-            audit_context={
-                "ticket_id": _ticket_label(ticket_data, ticket_index),
-                "confidence_pct": confidence_pct,
-                "top_drivers": top_drivers,
-            },
-            button_key=button_key,
-        )
-        st.markdown("</div>", unsafe_allow_html=True)
+    render_section_header("Suggested actions")
+    st.caption("Practical steps to lower delivery risk.")
+    st.markdown('<div class="card" style="margin-bottom: 1.2rem;">', unsafe_allow_html=True)
+    shap_drivers = {
+        "summary": str(ticket_data.get("Summary", "N/A")),
+        "priority": str(ticket_data.get("Priority", "N/A")),
+        "assignee_seniority": str(ticket_data.get("Assignee_Seniority", "N/A")),
+        "estimated_days": int(float(ticket_data.get("Estimated_Days", 0))),
+        "story_points": int(float(ticket_data.get("Story_Points", 0))),
+        "budget_allocated": float(ticket_data.get("Budget_Allocated", 0)),
+        "top_factors": top_drivers,
+    }
+    render_mitigation_engine(
+        ticket_index,
+        risk_label,
+        shap_drivers,
+        audit_context={
+            "ticket_id": _ticket_label(ticket_data, ticket_index),
+            "confidence_pct": confidence_pct,
+            "top_drivers": top_drivers,
+        },
+        button_key=button_key,
+    )
+    st.markdown("</div>", unsafe_allow_html=True)
 
     render_audit_trail(_ticket_label(ticket_data, ticket_index))
 
 
 def _render_full_auditor(dataset: pd.DataFrame, model) -> None:
-    """Render full auditor with optional multi-ticket comparison."""
     render_section_header("Select Ticket")
 
     preselected = int(st.session_state.get("auditor_ticket_index", 0) or 0)
@@ -163,7 +280,7 @@ def _render_full_auditor(dataset: pd.DataFrame, model) -> None:
         "Primary ticket",
         options=range(len(dataset)),
         index=preselected,
-        format_func=lambda x: f"Ticket #{x}",
+        format_func=lambda x: _ticket_label(dataset.iloc[int(x)], int(x)),
         label_visibility="collapsed",
     )
     st.session_state["auditor_ticket_index"] = int(single_ticket)
@@ -171,7 +288,7 @@ def _render_full_auditor(dataset: pd.DataFrame, model) -> None:
     comparison_mode = st.toggle(
         "Compare multiple tickets",
         value=False,
-        help="Recommended: compare up to 3 tickets side-by-side in stacked panels.",
+        help="Compare up to 2 tickets side-by-side.",
     )
     shap_mode = st.radio(
         "Explanation view",
@@ -181,18 +298,23 @@ def _render_full_auditor(dataset: pd.DataFrame, model) -> None:
 
     if comparison_mode:
         selected = st.multiselect(
-            "Tickets to compare (max 3)",
+            "Tickets to compare (max 2)",
             options=range(len(dataset)),
             default=[single_ticket],
-            format_func=lambda x: f"Ticket #{x}",
-            max_selections=3,
+            format_func=lambda x: _ticket_label(dataset.iloc[int(x)], int(x)),
+            max_selections=2,
         )
         if not selected:
             st.info("Select at least one ticket for comparison.")
             return
-        for idx in selected:
+        columns = st.columns(2, gap="large")
+        for pos, idx in enumerate(selected):
             ticket_data = dataset.iloc[int(idx)]
-            with st.expander(f"Ticket #{idx}", expanded=True):
+            with columns[pos]:
+                st.markdown(
+                    f"<div class=\"section-header\">{_ticket_label(ticket_data, int(idx))}</div>",
+                    unsafe_allow_html=True,
+                )
                 _render_split_columns(
                     ticket_index=int(idx),
                     ticket_data=ticket_data,
@@ -214,25 +336,21 @@ def _render_full_auditor(dataset: pd.DataFrame, model) -> None:
 
 
 def _render_risk_banner(risk_level: str, confidence: float) -> None:
-    """Render risk banner with thick left border and semi-transparent background."""
-
     level_lower = risk_level.lower()
-
     st.markdown(
         f"""
-        <div class="risk-banner risk-banner-{level_lower}">
-            <div style="display: flex; justify-content: space-between; align-items: center;">
+        <div class="risk-banner">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
                 <div>
-                    <div class="risk-banner-label">Predicted Risk Level</div>
+                    <div style="font-size:0.7rem; letter-spacing:0.08em; text-transform:uppercase; color:#8a8a8a;">Predicted Risk</div>
                     <div class="risk-banner-value risk-value-{level_lower}">{risk_level.upper()}</div>
                 </div>
-                <div style="text-align: right;">
-                    <div class="risk-banner-label">Confidence</div>
+                <div style="text-align:right;">
+                    <div style="font-size:0.7rem; letter-spacing:0.08em; text-transform:uppercase; color:#8a8a8a;">Confidence</div>
                     <div class="risk-banner-value risk-value-{level_lower}">{confidence:.0%}</div>
                 </div>
             </div>
         </div>
-    """,
+        """,
         unsafe_allow_html=True,
     )
-

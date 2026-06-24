@@ -79,22 +79,36 @@ def render_scenario_panels(comparison: dict[str, Any], model) -> None:
             render_shap_table(comparison["artifacts"]["simulated_features"], model)
 
 
+def safe_float(val, default=0.0) -> float:
+    """Safely convert value to float, defaulting on NaN/None/empty string."""
+    if pd.isna(val) or val is None or val == "":
+        return default
+    try:
+        import numpy as np
+        f_val = float(val)
+        if np.isnan(f_val):
+            return default
+        return f_val
+    except (ValueError, TypeError):
+        return default
+
+
 def render_input_metrics(simulated_row: pd.Series, comparison: dict[str, Any]) -> None:
     """Render input-level before/after highlights."""
     st.markdown("### Baseline vs Simulated Inputs")
     m1, m2, m3, m4 = st.columns(4)
     m1.metric(
         "Estimated Days",
-        f"{float(simulated_row.get('Estimated_Days', 0.0)):.2f}",
-        f"{comparison['delta']['timeline_delta']:+.2f}",
+        f"{safe_float(simulated_row.get('Estimated_Days')):.2f}",
+        f"{safe_float(comparison['delta']['timeline_delta']):+.2f}",
     )
     m2.metric(
         "Budget",
-        f"${float(simulated_row.get('Budget_Allocated', 0.0)):,.0f}",
-        f"${comparison['delta']['budget_delta']:+,.0f}",
+        f"${safe_float(simulated_row.get('Budget_Allocated')):,.0f}",
+        f"${safe_float(comparison['delta']['budget_delta']):+,.0f}",
         delta_color="inverse",
     )
-    m3.metric("Story Points", f"{float(simulated_row.get('Story_Points', 0.0)):.2f}")
+    m3.metric("Story Points", f"{safe_float(simulated_row.get('Story_Points')):.2f}")
     m4.metric("Priority", f"{simulated_row.get('Priority', 'N/A')}")
 
 
@@ -122,31 +136,31 @@ def render_scenario_export(
             ],
             "Original": [
                 original["risk_label"],
-                f"{original['high_risk_pct']:.2f}",
-                f"{original['confidence_pct']:.2f}",
-                f"{float(baseline_row.get('Estimated_Days', 0.0)):.2f}",
-                f"{float(baseline_row.get('Budget_Allocated', 0.0)):.2f}",
-                f"{float(baseline_row.get('Story_Points', 0.0)):.2f}",
+                f"{safe_float(original['high_risk_pct']):.2f}",
+                f"{safe_float(original['confidence_pct']):.2f}",
+                f"{safe_float(baseline_row.get('Estimated_Days')):.2f}",
+                f"{safe_float(baseline_row.get('Budget_Allocated')):.2f}",
+                f"{safe_float(baseline_row.get('Story_Points')):.2f}",
                 str(baseline_row.get("Priority", "N/A")),
                 str(baseline_row.get("Assignee_Seniority", "N/A")),
             ],
             "Simulated": [
                 simulated["risk_label"],
-                f"{simulated['high_risk_pct']:.2f}",
-                f"{simulated['confidence_pct']:.2f}",
-                f"{float(simulated_row.get('Estimated_Days', 0.0)):.2f}",
-                f"{float(simulated_row.get('Budget_Allocated', 0.0)):.2f}",
-                f"{float(simulated_row.get('Story_Points', 0.0)):.2f}",
+                f"{safe_float(simulated['high_risk_pct']):.2f}",
+                f"{safe_float(simulated['confidence_pct']):.2f}",
+                f"{safe_float(simulated_row.get('Estimated_Days')):.2f}",
+                f"{safe_float(simulated_row.get('Budget_Allocated')):.2f}",
+                f"{safe_float(simulated_row.get('Story_Points')):.2f}",
                 str(simulated_row.get("Priority", "N/A")),
                 str(simulated_row.get("Assignee_Seniority", "N/A")),
             ],
             "Delta": [
                 "",
-                f"{delta['high_risk_pct_change']:+.2f}",
-                f"{delta['confidence_pct_change']:+.2f}",
-                f"{delta['timeline_delta']:+.2f}",
-                f"{delta['budget_delta']:+.2f}",
-                f"{float(simulated_row.get('Story_Points', 0.0)) - float(baseline_row.get('Story_Points', 0.0)):+.2f}",
+                f"{safe_float(delta['high_risk_pct_change']):+.2f}",
+                f"{safe_float(delta['confidence_pct_change']):+.2f}",
+                f"{safe_float(delta['timeline_delta']):+.2f}",
+                f"{safe_float(delta['budget_delta']):+.2f}",
+                f"{safe_float(simulated_row.get('Story_Points')) - safe_float(baseline_row.get('Story_Points')):+.2f}",
                 "" if baseline_row.get("Priority") == simulated_row.get("Priority") else f"{baseline_row.get('Priority')} -> {simulated_row.get('Priority')}",
                 "" if baseline_row.get("Assignee_Seniority") == simulated_row.get("Assignee_Seniority") else f"{baseline_row.get('Assignee_Seniority')} -> {simulated_row.get('Assignee_Seniority')}",
             ],

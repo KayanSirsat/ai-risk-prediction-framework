@@ -30,7 +30,7 @@ class WhatIfSimulator:
     def __init__(self, model, dataset: pd.DataFrame, daily_burn_rate: float = 500.0) -> None:
         self.model = model
         self.dataset = dataset
-        self.daily_burn_rate = float(daily_burn_rate)
+        self.daily_burn_rate = daily_burn_rate
 
     def apply_deltas(
         self,
@@ -48,8 +48,24 @@ class WhatIfSimulator:
         """
         updated = baseline_row.copy(deep=True)
 
-        baseline_days = float(updated.get("Estimated_Days", 0.0))
-        baseline_budget = float(updated.get("Budget_Allocated", 0.0))
+        # Ensure we check for missing/NaN values and set safe fallbacks in updated Series
+        def clean_val(col, default):
+            val = updated.get(col)
+            if pd.isna(val) or val is None or val == "":
+                updated[col] = default
+                return default
+            return val
+
+        # Set default fallbacks in updated if missing/NaN
+        clean_val("Estimated_Days", 3.0)
+        clean_val("Budget_Allocated", 1500.0)
+        clean_val("Story_Points", 3.0)
+        clean_val("Priority", "Medium")
+        clean_val("Assignee_Seniority", "Mid")
+        clean_val("Issue_Type", "Task")
+
+        baseline_days = float(updated["Estimated_Days"])
+        baseline_budget = float(updated["Budget_Allocated"])
 
         timeline_extension = float(deltas.get("timeline_extension_days", 0.0))
         budget_multiplier = float(deltas.get("budget_multiplier", 1.0))
@@ -79,7 +95,7 @@ class WhatIfSimulator:
         else:
             updated_budget = baseline_budget
 
-        updated["Budget_Allocated"] = max(0.0, float(updated_budget))
+        updated["Budget_Allocated"] = max(0.0, updated_budget)
 
         # Optional direct numeric tuning for scope
         if "story_points_delta" in deltas:
@@ -159,11 +175,10 @@ class WhatIfSimulator:
         }
 
     def _preprocess_for_model(self, row: pd.Series) -> pd.DataFrame:
-        """Use existing app preprocessing to align with training columns."""
-        from app.components.ticket_viewer import _preprocess_row
+        from src.preprocessing.feature_alignment import preprocess_row
 
         target_free = row.drop(labels=["Risk_Level"], errors="ignore")
-        return _preprocess_row(target_free, self.dataset)
+        return preprocess_row(target_free, self.dataset)
 
     def _extract_top_driver_names(self, processed_features: pd.DataFrame, top_n: int = 5) -> list[str]:
         """Extract top SHAP features targeting High-risk class when available."""

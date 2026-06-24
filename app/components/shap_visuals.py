@@ -5,11 +5,37 @@ import pandas as pd
 import shap
 import streamlit as st
 
+from src.config import Paths
+
+
+def _align_features(ticket_features: pd.DataFrame) -> pd.DataFrame:
+    feature_path = str(Paths.FEATURE_COLUMNS)
+    if not feature_path:
+        return ticket_features
+
+    try:
+        import joblib
+
+        feature_columns = joblib.load(feature_path)
+    except Exception:
+        return ticket_features
+
+    missing = [col for col in feature_columns if col not in ticket_features.columns]
+    for col in missing:
+        ticket_features[col] = 0
+
+    extra = [col for col in ticket_features.columns if col not in feature_columns]
+    if extra:
+        ticket_features = ticket_features.drop(columns=extra)
+
+    return ticket_features[feature_columns]
+
 
 def _compute_top_drivers(ticket_features: pd.DataFrame, pipeline, top_n: int = 5) -> pd.DataFrame:
     """Compute top absolute SHAP drivers for one ticket row."""
+    aligned_features = _align_features(ticket_features.copy())
     explainer = shap.TreeExplainer(pipeline)
-    shap_values = explainer.shap_values(ticket_features)
+    shap_values = explainer.shap_values(aligned_features)
 
     if isinstance(shap_values, list):
         shap_array = np.array(shap_values)
@@ -28,7 +54,7 @@ def _compute_top_drivers(ticket_features: pd.DataFrame, pipeline, top_n: int = 5
         else:
             shap_abs = np.abs(shap_array).flatten()
 
-    feature_names = list(ticket_features.columns)
+    feature_names = list(aligned_features.columns)
     rows = list(zip(feature_names, shap_abs))
     rows.sort(key=lambda item: item[1], reverse=True)
     top = rows[:top_n]

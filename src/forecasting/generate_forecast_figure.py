@@ -103,7 +103,15 @@ axes[1].grid(True, alpha=0.3)
 mape = metrics.get("mape")
 rmse = metrics.get("rmse")
 r2 = metrics.get("r2")
-metrics_text = f"MAPE: {mape:.2f}%\nRMSE: {rmse:.2f}\nR²: {r2:.3f}"
+
+def _fmt(val, fmt_str):
+    return fmt_str.format(val) if val is not None else "N/A"
+
+metrics_text = (
+    f"MAPE: {_fmt(mape, '{:.2f}%')}\n"
+    f"RMSE: {_fmt(rmse, '{:.2f}')}\n"
+    f"R²: {_fmt(r2, '{:.3f}')}"
+)
 axes[0].text(
     0.02,
     0.98,
@@ -118,10 +126,10 @@ plt.tight_layout()
 plt.savefig(output_path, dpi=300)
 plt.close()
 
-print(f"MAPE: {mape:.2f}%, RMSE: {rmse:.2f}, R²: {r2:.3f}")
+print(f"MAPE: {_fmt(mape, '{:.2f}%')}, RMSE: {_fmt(rmse, '{:.2f}')}, R²: {_fmt(r2, '{:.3f}')}")
 logger.info(
-    "Forecast figure generated - MAPE: %.2f%%, RMSE: %.2f, R²: %.3f",
-    mape,
-    rmse,
-    r2,
+    "Forecast figure generated - MAPE: %s, RMSE: %s, R²: %s",
+    _fmt(mape, "{:.2f}%"),
+    _fmt(rmse, "{:.2f}"),
+    _fmt(r2, "{:.3f}"),
 )
